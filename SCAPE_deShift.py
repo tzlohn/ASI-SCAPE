@@ -49,18 +49,24 @@ def findFolderName(string):
     return [string[0:pos],string[pos+1:]]
 
 def formNewImage(RawImage,shift):
-    Shape = [RawImage.shape[0],RawImage.shape[1]+RawImage.shape[0]*abs(shift[0]),RawImage.shape[2]+RawImage.shape[0]*abs(shift[1])]
+    match len(RawImage.shape):
+        case 3:
+            idx_offset = 0
+            Shape = [RawImage.shape[0],RawImage.shape[1]+RawImage.shape[0]*abs(shift[0]),RawImage.shape[2]+RawImage.shape[0]*abs(shift[1])]
+        case 4:
+            idx_offset = 1
+            Shape = [RawImage.shape[0],RawImage.shape[1],RawImage.shape[2]+RawImage.shape[1]*abs(shift[0]),RawImage.shape[3]+RawImage.shape[1]*abs(shift[1])]
     NewImage = np.zeros(shape = Shape,dtype=RawImage.dtype)
-    layer = RawImage.shape[0]
-    x_length = RawImage.shape[1]
-    y_length = RawImage.shape[2]
+    layer = RawImage.shape[0+idx_offset]
+    x_length = RawImage.shape[1+idx_offset]
+    y_length = RawImage.shape[2+idx_offset]
     for z in range(layer):
         if shift[0] > 0:
             offset_x = 0
             start_x = offset_x + z*shift[0]
             end_x = abs(offset_x-x_length)+z*shift[0]
         else:
-            offset_x = NewImage.shape[1]
+            offset_x = NewImage.shape[1+idx_offset]
             end_x = offset_x + z*shift[0]
             start_x = abs(offset_x-x_length)+z*shift[0]
         
@@ -69,12 +75,17 @@ def formNewImage(RawImage,shift):
             start_y = offset_y + z*shift[1]
             end_y = abs(offset_y-y_length)+z*shift[1]
         else:
-            offset_y = NewImage.shape[2]
+            offset_y = NewImage.shape[2+idx_offset]
             end_y = offset_y + z*shift[1]
             start_y = abs(offset_y-y_length)+z*shift[1]
         try:
-            NewImage[z,start_x:end_x,start_y:end_y] = RawImage[z,:,:]    
+            match len(RawImage.shape):
+                case 3:
+                    NewImage[z,start_x:end_x,start_y:end_y] = RawImage[z,:,:]
+                case 4:
+                    NewImage[:,z,start_x:end_x,start_y:end_y] = RawImage[:,z,:,:]    
         except:
+            #pass
             print(z,start_x,end_x,start_y,end_y)
         
     return NewImage
@@ -190,10 +201,8 @@ if __name__ == "__main__":
             for atif in AllTif:
                 if atif[0:6] == "Deskew":
                     os.remove(atif)
-                else:
-                    iName = atif        
-        else:
-            iName = AllTif[0]
+
+        iName = AllTif[0]
         ImgName = cwd+"/"+iName
         print(ImgName)
     #"""
@@ -239,12 +248,35 @@ if __name__ == "__main__":
                             for n in c[b][q]:
                                 print(n)
         """
+        with TFF.TiffFile(ImgName) as tif:
+            #img = tif.asarray()
+            #img = TFF.memmap("test.tif",shape = tif.pages[0].shape) 
+            OMEmeta = to_dict(tif.ome_metadata)
+            MetaList = OMEmeta["images"]
+            MetaDict = MetaList[-1]
+            MetaDict = MetaDict["pixels"]
+            DimOrder = MetaDict["dimension_order"].name
+            DimOrder = DimOrder.lower()
+            ImageShape = (MetaDict["size_"+DimOrder[0]],MetaDict["size_"+DimOrder[1]],MetaDict["size_"+DimOrder[2]],MetaDict["size_"+DimOrder[3]],MetaDict["size_"+DimOrder[4]])
+            print(ImageShape)
+            """
+            for key in metadict["images"]:
+                if type(key) is dict:
+                    print(type(key["pixels"]))
+                    for a in key["pixels"]:
+                        print(a)
+                        #print(a,":",key[a])
+            """
+            n = 0
+            for aPage in tif.pages:
+                n = n+1
 
-        with TFF.TiffFile(ImgName) as tif:            
-            img = tif.asarray()
             tags = tif.pages[0].tags#imagej_metadata
             metadata = tif.imagej_metadata
-            series = tif.series[0]            
+
+            #print(tags)
+            #print(metadata)
+            #series = tif.series[0]            
             tif.close()
             with open("OME.xml","w") as xml:
                 xml.write(tags["ImageDescription"].value)
@@ -252,21 +284,27 @@ if __name__ == "__main__":
             #print(metadata)
         meta = combineMetadata(json.loads(metadata["Info"]),StackMetadata)
         metadata["Info"] = meta
-        metadata["axes"] = "ZYX"
+        
         ColorImg = list()
-
-        if img.ndim == 4:
-            for n in range(img.shape[1]):
-                ColorImg.append(img[:,n,:,:])
-        else:
-            if ChannelNo == 1:
-                ColorImg.append(img)
-            else:
-                for idx in range(ChannelNo):
-                    CurrentChannel = list()
-                    for ind in range(0,img.shape[0],ChannelNo):
-                        CurrentChannel.append(ind+idx)
-                    ColorImg.append(np.asarray(CurrentChannel))
+        #print(img.shape)
+        match img.ndim:
+            case 4:
+                metadata["axes"] = "ZYX"
+                for n in range(img.shape[1]):
+                    ColorImg.append(img[:,n,:,:])
+            case 5:
+                metadata["axes"] = "TZYX"
+                for n in range(img.shape[2]):
+                    ColorImg.append(img[0:10,:,n,:,:])                
+            case other:
+                if ChannelNo == 1:
+                    ColorImg.append(img)
+                else:
+                    for idx in range(ChannelNo):
+                        CurrentChannel = list()
+                        for ind in range(0,img.shape[0],ChannelNo):
+                            CurrentChannel.append(ind+idx)
+                        ColorImg.append(np.asarray(CurrentChannel))
         
         if isCalibrate:
             Shift = calibrateShift(img)
@@ -291,6 +329,7 @@ if __name__ == "__main__":
             NewImage = formNewImage(AImage,[shift_x,shift_y])
             print("Writing channel",idx+1)
             TFF.imwrite(NewFileName,NewImage,dtype = np.uint16,resolution=(1/0.097,1/0.097),metadata = metadata,ome = True, bigtiff=True)
+            #TFF.memmap(NewFileName,NewImage,shape=NewImage.shape,dtype = np.uint16,resolution=(1/0.097,1/0.097),metadata = metadata,ome = True, bigtiff=True)
     
     input("finished...")
         #TFF.imwrite(NewFileName,NewImage)
