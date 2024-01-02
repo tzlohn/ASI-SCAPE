@@ -48,6 +48,33 @@ def findFolderName(string):
     pos = len(string)+n
     return [string[0:pos],string[pos+1:]]
 
+def getNewPageSize(PageSize,Shift):
+    Shape = [PageSize[1]+PageSize[0]*abs(Shift[0]),PageSize[2]+PageSize[0]*abs(Shift[1])]    
+    return Shape
+
+def getAssignCoordinate(shift,shape,z,nx_length,ny_length):
+    x_length = shape[-2]
+    y_length = shape[-1]
+    if shift[0] > 0:
+        offset_x = 0
+        start_x = offset_x + z*shift[0]
+        end_x = abs(offset_x-x_length)+z*shift[0]
+    else:
+        offset_x = nx_length
+        end_x = offset_x + z*shift[0]
+        start_x = abs(offset_x-x_length)+z*shift[0]
+    
+    if shift[1] > 0:
+        offset_y = 0
+        start_y = offset_y + z*shift[1]
+        end_y = abs(offset_y-y_length)+z*shift[1]
+    else:
+        offset_y = ny_length
+        end_y = offset_y + z*shift[1]
+        start_y = abs(offset_y-y_length)+z*shift[1]
+    
+    return [int(start_x),int(end_x),int(start_y),int(end_y)]
+
 def formNewImage(RawImage,shift):
     match len(RawImage.shape):
         case 3:
@@ -109,6 +136,7 @@ def calibrateShift(img):
     UpperLayer = simpledialog.askinteger("z range","please enter the first layer for deskewing:\nstart from 1,end at %d"%img.shape[0])-1
     LowerLayer = simpledialog.askinteger("z range","please enter the last layer for deskewing: \nend at %d"%img.shape[0])-1
     
+    ColorImg = list()
     if img.ndim == 4:
         for n in range(img.shape[1]):
             ColorImg.append(img[UpperLayer:LowerLayer+1,n,:,:])
@@ -157,9 +185,9 @@ def calibrateShift(img):
         ShiftByChannel.append(Shift)
     return ShiftByChannel
 
-def getShift(StepSize,img):
-    dim_x = img.shape[-1]
-    dim_y = img.shape[-2]
+def getShift(StepSize,shape):
+    dim_x = shape[-1]
+    dim_y = shape[-2]
     scale = 2048/dim_y
     print("scale : ",scale)
     slope_y = -16/scale # pixel/µm
@@ -170,6 +198,21 @@ def getShift(StepSize,img):
     shift_y = (StepSize*slope_y + offset_y)
 
     return (shift_x,shift_y)
+
+def getDataSize(shape,dtype):
+    pixel = 1
+    for v in shape:
+        pixel = v*pixel
+    match dtype:
+        case "UINT16":
+            digit = 2
+        case "UINT8":
+            digit = 1
+    #return kbyte
+    return pixel*digit/1024
+
+def getSingleFileSize(DimOrder,Shape,DataSize):
+    pass
 
 if __name__ == "__main__":
 
@@ -222,69 +265,80 @@ if __name__ == "__main__":
         #UpperLayer = simpledialog.askinteger("z range","please enter the first layer for deskewing:\nstart from 1")-1
         #LowerLayer = simpledialog.askinteger("z range","please enter the last layer for deskewing:")-1
 
-        ome = OME()
-        """
-        OmeXml = from_tiff(ImgName)
-        pixels = OmeXml.images[0].pixels
-        for p in pixels:
-            try:
-                if len(p[1])>3:
-                    for q in p[1]:
-                        print(q)
-            except:
-                continue
-        
-        DataDict = to_dict(OmeXml)
-        
-        for p in DataDict:
-            d = DataDict[p]
-            c = d[0]
-            for b in c:
-                if b != "pixels":
-                    print(p,b,":",c[b])
-                else:
-                    for q in c[b]:
-                        if q == "tiff_data_blocks":
-                            for n in c[b][q]:
-                                print(n)
-        """
-        with TFF.TiffFile(ImgName) as tif:
-            #img = tif.asarray()
+
+        with TFF.TiffFile(ImgName) as tif:            
             #img = TFF.memmap("test.tif",shape = tif.pages[0].shape) 
             OMEmeta = to_dict(tif.ome_metadata)
             MetaList = OMEmeta["images"]
             MetaDict = MetaList[-1]
             MetaDict = MetaDict["pixels"]
+            NumType = MetaDict["type"].name
             DimOrder = MetaDict["dimension_order"].name
             DimOrder = DimOrder.lower()
-            ImageShape = (MetaDict["size_"+DimOrder[0]],MetaDict["size_"+DimOrder[1]],MetaDict["size_"+DimOrder[2]],MetaDict["size_"+DimOrder[3]],MetaDict["size_"+DimOrder[4]])
+            OriImageShape = [MetaDict["size_t"],MetaDict["size_c"],MetaDict["size_z"],MetaDict["size_y"],MetaDict["size_x"]]
+            #ImageShape.reverse()
+            #ImageShape = tuple(ImageShape)
+
+            if isCalibrate:
+                img = tif.asarray()
+                Shift = calibrateShift(img)
+            else:
+                Shift = getShift(SliceStep,OriImageShape[-3:])
+                NewSize = getNewPageSize(OriImageShape[-3:],Shift)
+            
+            ImageShape = OriImageShape.copy()
+            ImageShape[-2] = int(NewSize[-2])
+            ImageShape[-1] = int(NewSize[-1])
+            ImageShape = tuple(ImageShape)
             print(ImageShape)
-            """
-            for key in metadict["images"]:
-                if type(key) is dict:
-                    print(type(key["pixels"]))
-                    for a in key["pixels"]:
-                        print(a)
-                        #print(a,":",key[a])
-            """
-            n = 0
-            for aPage in tif.pages:
-                n = n+1
 
             tags = tif.pages[0].tags#imagej_metadata
             metadata = tif.imagej_metadata
-
-            #print(tags)
-            #print(metadata)
-            #series = tif.series[0]            
-            tif.close()
             with open("OME.xml","w") as xml:
                 xml.write(tags["ImageDescription"].value)
                 xml.close()
+            tif.close()
             #print(metadata)
+        ImageSize = getDataSize(ImageShape,NumType)
         meta = combineMetadata(json.loads(metadata["Info"]),StackMetadata)
         metadata["Info"] = meta
-        
+        metadata["axes"] = "TCZYX"
+        NewFileName = "Deskew_"+FileName[1][0:-4]+".tif"
+        img =TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, metadata = metadata, bigtiff = True)
+
+        FileName = list()
+        TiffPars = list()
+        OnePar = list()
+        isFirst = True   
+        for tiff_data in MetaDict["tiff_data_blocks"]: #"planes" as key
+            if not tiff_data["uuid"]["file_name"] in FileName:
+                if len(FileName) != 0:
+                    TiffPars.append(OnePar)              
+                FileName.append(tiff_data["uuid"]["file_name"])
+                OnePar = list()
+            OnePar.append(tiff_data)    
+        TiffPars.append(OnePar)
+
+        for tifname,tiffpars in zip(FileName,TiffPars):
+            print(tifname)
+            with TFF.TiffFile(tifname) as tif:
+                DataList = list()
+                for page,pars in zip(tif.pages,tiffpars):
+                    data = page.asarray()
+                    ChannelNo = pars["first_c"]
+                    Time = pars["first_t"]
+                    ZPos = pars["first_z"]
+                    #print(ChannelNo,Time,ZPos)
+                    [start_x,end_x,start_y,end_y] = getAssignCoordinate(Shift,OriImageShape,ZPos,int(NewSize[-2]),int(NewSize[-1]))
+                    #print([start_x,end_x,start_y,end_y])
+                    try:
+                        img[Time,ChannelNo,ZPos,start_x:end_x,start_y:end_y] = data
+                        DataList.append(data)
+                    except:
+                        print("OME-metadata has a wrong index",ChannelNo,Time,ZPos)   
+                img.flush()
+                tif.close()
+        """            
         ColorImg = list()
         #print(img.shape)
         match img.ndim:
@@ -305,11 +359,6 @@ if __name__ == "__main__":
                         for ind in range(0,img.shape[0],ChannelNo):
                             CurrentChannel.append(ind+idx)
                         ColorImg.append(np.asarray(CurrentChannel))
-        
-        if isCalibrate:
-            Shift = calibrateShift(img)
-        else:
-            Shift = getShift(SliceStep,img)
 
         if os.path.isdir("Deskew"):
             print("there are old deskewed images, please delete them for the new processing")
@@ -330,7 +379,7 @@ if __name__ == "__main__":
             print("Writing channel",idx+1)
             TFF.imwrite(NewFileName,NewImage,dtype = np.uint16,resolution=(1/0.097,1/0.097),metadata = metadata,ome = True, bigtiff=True)
             #TFF.memmap(NewFileName,NewImage,shape=NewImage.shape,dtype = np.uint16,resolution=(1/0.097,1/0.097),metadata = metadata,ome = True, bigtiff=True)
-    
+        """
     input("finished...")
         #TFF.imwrite(NewFileName,NewImage)
     #"""
