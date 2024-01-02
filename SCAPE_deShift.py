@@ -226,7 +226,7 @@ if __name__ == "__main__":
     #ImgName = filedialog.askopenfilename()
     #"""
     print("This app is for de-shifting the image acquired by the EMBL configuration of ASI-SCAPE")
-    print("Author: Tzu-Lun Ohn @EMBL-imaging centre. v0.2 06-12-23")
+    print("Author: Tzu-Lun Ohn @EMBL-imaging centre. v0.3 02-01-24")
     FolderName = filedialog.askdirectory(title="please select the folder containing the image and metadata files")
     try:
         AllFolder = os.listdir(FolderName)
@@ -300,8 +300,11 @@ if __name__ == "__main__":
             tif.close()
             #print(metadata)
         ImageSize = getDataSize(ImageShape,NumType)
-        meta = combineMetadata(json.loads(metadata["Info"]),StackMetadata)
-        metadata["Info"] = meta
+        try:
+            meta = combineMetadata(json.loads(metadata["Info"]),StackMetadata)
+            metadata["Info"] = meta
+        except:
+            metadata = dict()
         metadata["axes"] = "TCZYX"
         NewFileName = "Deskew_"+FileName[1][0:-4]+".tif"
         img =TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, metadata = metadata, bigtiff = True)
