@@ -214,6 +214,20 @@ def getDataSize(shape,dtype):
 def getSingleFileSize(DimOrder,Shape,DataSize):
     pass
 
+def getMetaData(FileName,StackMetadata):
+    with TFF.TiffFile(FileName) as tif:
+        tags = tif.pages[0].tags#imagej_metadata
+        metadata = tif.imagej_metadata
+        try:
+            meta = combineMetadata(json.loads(metadata["Info"]),StackMetadata)
+            metadata["Info"] = meta
+        except:
+            metadata = dict()
+        metadata["axes"] = "TCZYX"
+        tif.close
+    return metadata
+
+
 if __name__ == "__main__":
 
     isCalibrate = False
@@ -270,21 +284,12 @@ if __name__ == "__main__":
             #img = TFF.memmap("test.tif",shape = tif.pages[0].shape) 
             OMEmeta = to_dict(tif.ome_metadata)
             MetaList = OMEmeta["images"]
-            tags = tif.pages[0].tags#imagej_metadata
-            metadata = tif.imagej_metadata
             """
             with open("OME.xml","w") as xml:
                 xml.write(tags["ImageDescription"].value)
                 xml.close()
             """
             tif.close()
-        
-        try:
-            meta = combineMetadata(json.loads(metadata["Info"]),StackMetadata)
-            metadata["Info"] = meta
-        except:
-            metadata = dict()
-        metadata["axes"] = "TCZYX"
         
         for MetaDict in MetaList:
             FileName = MetaDict["name"]
@@ -314,7 +319,8 @@ if __name__ == "__main__":
         
             ImageSize = getDataSize(ImageShape,NumType)
 
-            #print(type(metadata))
+            metadata = getMetaData(FileName+".ome.tif",StackMetadata)
+
             NewFileName = "Deskew_"+FileName+".tif"
             img =TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, metadata = metadata, bigtiff = True)
             #img =TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, bigtiff = True)
