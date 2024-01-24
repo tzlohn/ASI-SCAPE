@@ -224,7 +224,7 @@ def getMetaData(FileName,StackMetadata):
         except:
             metadata = dict()
         metadata["axes"] = "TCZYX"
-        tif.close
+        tif.close()
     return metadata
 
 
@@ -319,7 +319,7 @@ if __name__ == "__main__":
         
             ImageSize = getDataSize(ImageShape,NumType)
 
-            metadata =getMetaData(FileName+".ome.tif",StackMetadata)
+            metadata = getMetaData(FileName+".ome.tif",StackMetadata)
 
             NewFileName = "Deskew_"+FileName+".tif"
             img =TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, metadata = metadata, bigtiff = True)
