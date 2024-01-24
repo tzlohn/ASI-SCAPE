@@ -319,7 +319,7 @@ if __name__ == "__main__":
         
             ImageSize = getDataSize(ImageShape,NumType)
 
-            metadata = getMetaData(FileName+".ome.tif",StackMetadata)
+            metadata =getMetaData(FileName+".ome.tif",StackMetadata)
 
             NewFileName = "Deskew_"+FileName+".tif"
             img =TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, metadata = metadata, bigtiff = True)
@@ -357,6 +357,7 @@ if __name__ == "__main__":
                             print("OME-metadata has a wrong index",ChannelNo,Time,ZPos)   
                     img.flush()
                     tif.close()
+            
             """            
         ColorImg = list()
         #print(img.shape)
