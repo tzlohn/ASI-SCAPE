@@ -214,19 +214,42 @@ def getDataSize(shape,dtype):
 def getSingleFileSize(DimOrder,Shape,DataSize):
     pass
 
-def getMetaData(FileName,StackMetadata):
-    with TFF.TiffFile(FileName) as tif:
-        tags = tif.pages[0].tags#imagej_metadata
-        metadata = tif.imagej_metadata
-        try:
-            meta = combineMetadata(json.loads(metadata["Info"]),StackMetadata)
-            metadata["Info"] = meta
-        except:
-            metadata = dict()
-        metadata["axes"] = "TCZYX"
-        tif.close()
-    return metadata
+def createImage(FileName,ImageShape,metadata,MetaDict,OriImageShape,NewSize):
+    NewFileName = "Deskew_"+FileName+".ome.tif"
+    img =TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, metadata = metadata, bigtiff = True)
 
+    FileName = list()
+    TiffPars = list()
+    OnePar = list()
+    isFirst = True   
+    for tiff_data in MetaDict["tiff_data_blocks"]: #"planes" as key
+        if not tiff_data["uuid"]["file_name"] in FileName:
+            if len(FileName) != 0:
+                TiffPars.append(OnePar)              
+            FileName.append(tiff_data["uuid"]["file_name"])
+            OnePar = list()
+        OnePar.append(tiff_data)    
+    TiffPars.append(OnePar)
+
+    for tifname,tiffpars in zip(FileName,TiffPars):
+        print(tifname)
+        with TFF.TiffFile(tifname) as tif:
+            DataList = list()
+            for page,pars in zip(tif.pages,tiffpars):
+                data = page.asarray()
+                ChannelNo = pars["first_c"]
+                Time = pars["first_t"]
+                ZPos = pars["first_z"]
+                #print(ChannelNo,Time,ZPos)
+                [start_x,end_x,start_y,end_y] = getAssignCoordinate(Shift,OriImageShape,ZPos,int(NewSize[-2]),int(NewSize[-1]))
+                #print([start_x,end_x,start_y,end_y])
+                try:
+                    img[Time,ChannelNo,ZPos,start_x:end_x,start_y:end_y] = data
+                    DataList.append(data)
+                except:
+                    print("OME-metadata has a wrong index",ChannelNo,Time,ZPos)   
+            img.flush()
+            tif.close()
 
 if __name__ == "__main__":
 
@@ -280,33 +303,22 @@ if __name__ == "__main__":
         #LowerLayer = simpledialog.askinteger("z range","please enter the last layer for deskewing:")-1
 
 
-        with TFF.TiffFile(ImgName) as tif:       
+        with TFF.TiffFile(ImgName) as tif:            
             #img = TFF.memmap("test.tif",shape = tif.pages[0].shape) 
             OMEmeta = to_dict(tif.ome_metadata)
             MetaList = OMEmeta["images"]
-            """
-            with open("OME.xml","w") as xml:
-                xml.write(tags["ImageDescription"].value)
-                xml.close()
-            """
-            tif.close()
-        
-        for MetaDict in MetaList:
-            FileName = MetaDict["name"]
-            print(FileName)
-            MetaPixel = MetaDict["pixels"]
-            NumType = MetaPixel["type"].name
-            DimOrder = MetaPixel["dimension_order"].name
+            MetaDict = MetaList[0]
+            MetaDict = MetaDict["pixels"]
+            NumType = MetaDict["type"].name
+            DimOrder = MetaDict["dimension_order"].name
             DimOrder = DimOrder.lower()
-            OriImageShape = [MetaPixel["size_t"],MetaPixel["size_c"],MetaPixel["size_z"],MetaPixel["size_y"],MetaPixel["size_x"]]
+            OriImageShape = [MetaDict["size_t"],MetaDict["size_c"],MetaDict["size_z"],MetaDict["size_y"],MetaDict["size_x"]]
             #ImageShape.reverse()
             #ImageShape = tuple(ImageShape)
 
             if isCalibrate:
-                with TFF.TiffFile(FileName) as tif:       
-                    img = tif.asarray()
-                    Shift = calibrateShift(img)
-                    tif.close()
+                img = tif.asarray()
+                Shift = calibrateShift(img)
             else:
                 Shift = getShift(SliceStep,OriImageShape[-3:])
                 NewSize = getNewPageSize(OriImageShape[-3:],Shift)
@@ -316,47 +328,28 @@ if __name__ == "__main__":
             ImageShape[-1] = int(NewSize[-1])
             ImageShape = tuple(ImageShape)
             print(ImageShape)
-        
-            ImageSize = getDataSize(ImageShape,NumType)
 
-            metadata = getMetaData(FileName+".ome.tif",StackMetadata)
+            tags = tif.pages[0].tags#imagej_metadata
+            metadata = tif.imagej_metadata
+            """
+            with open("OME.xml","w") as xml:
+                xml.write(tags["ImageDescription"].value)
+                xml.close()
+            """
+            tif.close()
+            #print(metadata)
+        ImageSize = getDataSize(ImageShape,NumType)
+        try:
+            meta = combineMetadata(json.loads(metadata["Info"]),StackMetadata)
+            metadata["Info"] = meta
+        except:
+            metadata = dict()
+        metadata["axes"] = "TCZYX"
 
-            NewFileName = "Deskew_"+FileName+".tif"
-            img =TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, metadata = metadata, bigtiff = True)
-            #img =TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, bigtiff = True)
-
-            FileName = list()
-            TiffPars = list()
-            OnePar = list()
-            isFirst = True   
-            for tiff_data in MetaPixel["tiff_data_blocks"]: #"planes" as key
-                if not tiff_data["uuid"]["file_name"] in FileName:
-                    if len(FileName) != 0:
-                        TiffPars.append(OnePar)              
-                    FileName.append(tiff_data["uuid"]["file_name"])
-                    OnePar = list()
-                OnePar.append(tiff_data)    
-            TiffPars.append(OnePar)
-
-            for tifname,tiffpars in zip(FileName,TiffPars):
-                print(tifname)
-                with TFF.TiffFile(tifname) as tif:
-                    DataList = list()
-                    for page,pars in zip(tif.pages,tiffpars):
-                        data = page.asarray()
-                        ChannelNo = pars["first_c"]
-                        Time = pars["first_t"]
-                        ZPos = pars["first_z"]
-                        #print(ChannelNo,Time,ZPos)
-                        [start_x,end_x,start_y,end_y] = getAssignCoordinate(Shift,OriImageShape,ZPos,int(NewSize[-2]),int(NewSize[-1]))
-                        #print([start_x,end_x,start_y,end_y])
-                        try:
-                            img[Time,ChannelNo,ZPos,start_x:end_x,start_y:end_y] = data
-                            DataList.append(data)
-                        except:
-                            print("OME-metadata has a wrong index",ChannelNo,Time,ZPos)   
-                    img.flush()
-                    tif.close()
+        for MetaDict in MetaList:
+            FileName = MetaDict["name"]
+            MetaDict = MetaDict["pixels"]
+            createImage(FileName,ImageShape,metadata,MetaDict,OriImageShape,NewSize)
             
             """            
         ColorImg = list()
