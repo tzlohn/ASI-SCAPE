@@ -279,6 +279,13 @@ if __name__ == "__main__":
             """
             tif.close()
         
+        try:
+            meta = combineMetadata(json.loads(metadata["Info"]),StackMetadata)
+            metadata["Info"] = meta
+        except:
+            metadata = dict()
+        metadata["axes"] = "TCZYX"
+        
         for MetaDict in MetaList:
             FileName = MetaDict["name"]
             print(FileName)
@@ -306,15 +313,11 @@ if __name__ == "__main__":
             print(ImageShape)
         
             ImageSize = getDataSize(ImageShape,NumType)
-            try:
-                meta = combineMetadata(json.loads(metadata["Info"]),StackMetadata)
-                metadata["Info"] = meta
-            except:
-                metadata = dict()
-            metadata["axes"] = "TCZYX"
-            print(metadata)
-            NewFileName = "Deskew_"+FileName[0:-4]+".tif"
+
+            #print(type(metadata))
+            NewFileName = "Deskew_"+FileName+".tif"
             img =TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, metadata = metadata, bigtiff = True)
+            #img =TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, bigtiff = True)
 
             FileName = list()
             TiffPars = list()
