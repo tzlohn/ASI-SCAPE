@@ -2,7 +2,7 @@ import numpy as np
 from scipy.fftpack import fft2,fftshift,ifft2
 import tifffile as TFF
 import tkinter as tk
-from tkinter import filedialog,simpledialog
+from tkinter import filedialog,simpledialog,messagebox
 import multiprocessing as mp
 from multiprocessing import get_context
 import json,os,glob
@@ -217,7 +217,7 @@ def getSingleFileSize(DimOrder,Shape,DataSize):
 def createImage(FileName,ImageShape,metadata,MetaDict,OriImageShape,NewSize,isTime = False):
     if not isTime:
         NewFileName = "Deskew_"+FileName+".ome.tif"
-        img =TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, metadata = metadata, bigtiff = True)
+        img =TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, metadata = metadata, bigtiff = True, mode = "w+")
     else:
         TimeNo = ImageShape[0]
         ImageShape = ImageShape[1:]
@@ -225,7 +225,7 @@ def createImage(FileName,ImageShape,metadata,MetaDict,OriImageShape,NewSize,isTi
         ImgList = list()
         for idx in range(TimeNo):
             NewFileName = "Deskew_"+FileName+"_"+str(idx)+".ome.tif"
-            ImgList.append(TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, metadata = metadata, bigtiff = True))            
+            ImgList.append(TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, metadata = metadata, bigtiff = True, mode = "w+"))            
 
     FileName = list()
     TiffPars = list()
@@ -279,11 +279,12 @@ if __name__ == "__main__":
     print("This app is for de-shifting the image acquired by the EMBL configuration of ASI-SCAPE")
     print("Author: Tzu-Lun Ohn @EMBL-imaging centre. v0.4 24-01-24")
     FolderName = filedialog.askdirectory(title="please select the folder containing the image and metadata files")
-    IsTime = simpledialog.askinteger(title="",prompt = "split time to different files?\nenter 0 for No and 1 for Yes")
+    #IsTime = simpledialog.askinteger(title="",prompt = "split time to different files?\nenter 0 for No and 1 for Yes")
+    IsTime = messagebox.askquestion("","split time to different files?")
 
-    if IsTime == 1:
+    if IsTime == "yes":
         isTime = True
-    else:
+    elif IsTime == "no":
         isTime = False
 
     try:
