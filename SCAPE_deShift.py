@@ -214,9 +214,18 @@ def getDataSize(shape,dtype):
 def getSingleFileSize(DimOrder,Shape,DataSize):
     pass
 
-def createImage(FileName,ImageShape,metadata,MetaDict,OriImageShape,NewSize):
-    NewFileName = "Deskew_"+FileName+".ome.tif"
-    img =TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, metadata = metadata, bigtiff = True)
+def createImage(FileName,ImageShape,metadata,MetaDict,OriImageShape,NewSize,isTime = False):
+    if not isTime:
+        NewFileName = "Deskew_"+FileName+".ome.tif"
+        img =TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, metadata = metadata, bigtiff = True)
+    else:
+        TimeNo = ImageShape[0]
+        ImageShape = ImageShape[1:]
+        metadata["axes"] = "CZYX"
+        ImgList = list()
+        for idx in range(TimeNo):
+            NewFileName = "Deskew_"+FileName+"_"+str(idx)+".ome.tif"
+            ImgList.append(TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, metadata = metadata, bigtiff = True))            
 
     FileName = list()
     TiffPars = list()
@@ -234,7 +243,6 @@ def createImage(FileName,ImageShape,metadata,MetaDict,OriImageShape,NewSize):
     for tifname,tiffpars in zip(FileName,TiffPars):
         print(tifname)
         with TFF.TiffFile(tifname) as tif:
-            DataList = list()
             for page,pars in zip(tif.pages,tiffpars):
                 data = page.asarray()
                 ChannelNo = pars["first_c"]
@@ -244,11 +252,17 @@ def createImage(FileName,ImageShape,metadata,MetaDict,OriImageShape,NewSize):
                 [start_x,end_x,start_y,end_y] = getAssignCoordinate(Shift,OriImageShape,ZPos,int(NewSize[-2]),int(NewSize[-1]))
                 #print([start_x,end_x,start_y,end_y])
                 try:
-                    img[Time,ChannelNo,ZPos,start_x:end_x,start_y:end_y] = data
-                    DataList.append(data)
+                    if not isTime:
+                        img[Time,ChannelNo,ZPos,start_x:end_x,start_y:end_y] = data
+                    else:
+                        ImgList[Time][ChannelNo,ZPos,start_x:end_x,start_y:end_y] = data
                 except:
-                    print("OME-metadata has a wrong index",ChannelNo,Time,ZPos)   
-            img.flush()
+                    print("OME-metadata has a wrong index",ChannelNo,Time,ZPos)
+            if not isTime:   
+                img.flush()
+            else:
+                for img in ImgList:
+                    img.flush()
             tif.close()
 
 if __name__ == "__main__":
@@ -263,8 +277,15 @@ if __name__ == "__main__":
     #ImgName = filedialog.askopenfilename()
     #"""
     print("This app is for de-shifting the image acquired by the EMBL configuration of ASI-SCAPE")
-    print("Author: Tzu-Lun Ohn @EMBL-imaging centre. v0.3 02-01-24")
+    print("Author: Tzu-Lun Ohn @EMBL-imaging centre. v0.4 24-01-24")
     FolderName = filedialog.askdirectory(title="please select the folder containing the image and metadata files")
+    IsTime = simpledialog.askinteger(title="",prompt = "split time to different files?\nenter 0 for No and 1 for Yes")
+
+    if IsTime == 1:
+        isTime = True
+    else:
+        isTime = False
+
     try:
         AllFolder = os.listdir(FolderName)
     except:
@@ -349,7 +370,7 @@ if __name__ == "__main__":
         for MetaDict in MetaList:
             FileName = MetaDict["name"]
             MetaDict = MetaDict["pixels"]
-            createImage(FileName,ImageShape,metadata,MetaDict,OriImageShape,NewSize)
+            createImage(FileName,ImageShape,metadata,MetaDict,OriImageShape,NewSize,isTime)
             
             """            
         ColorImg = list()
