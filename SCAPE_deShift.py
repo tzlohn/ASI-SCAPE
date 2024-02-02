@@ -185,7 +185,10 @@ def calibrateShift(img):
         ShiftByChannel.append(Shift)
     return ShiftByChannel
 
-def getShift(StepSize,shape):
+def getShift(StepSize,shape,isRotate = True):
+    """
+    isRotate is True for all images acquried after 2024, before 2024 is false
+    """
     dim_x = shape[-1]
     dim_y = shape[-2]
     scale = 2048/dim_y
@@ -197,7 +200,10 @@ def getShift(StepSize,shape):
     shift_x = (StepSize*slope_x + offset_x)
     shift_y = (StepSize*slope_y + offset_y)
 
-    return (shift_x,shift_y)
+    if not isRotate:
+        return (shift_x,shift_y)
+    else:
+        return (-shift_y,shift_x)
 
 def getDataSize(shape,dtype):
     pixel = 1
@@ -217,7 +223,7 @@ def getSingleFileSize(DimOrder,Shape,DataSize):
 def createImage(FileName,ImageShape,metadata,MetaDict,OriImageShape,NewSize,isTime = False):
     if not isTime:
         NewFileName = "Deskew_"+FileName+".ome.tif"
-        img =TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, metadata = metadata, bigtiff = True, mode = "w+")
+        img =TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, metadata = metadata, bigtiff = True)
     else:
         TimeNo = ImageShape[0]
         ImageShape = ImageShape[1:]
@@ -225,7 +231,7 @@ def createImage(FileName,ImageShape,metadata,MetaDict,OriImageShape,NewSize,isTi
         ImgList = list()
         for idx in range(TimeNo):
             NewFileName = "Deskew_"+FileName+"_"+str(idx)+".ome.tif"
-            ImgList.append(TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, metadata = metadata, bigtiff = True, mode = "w+"))            
+            ImgList.append(TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, metadata = metadata, bigtiff = True))            
 
     FileName = list()
     TiffPars = list()
