@@ -185,13 +185,20 @@ def calibrateShift(img):
         ShiftByChannel.append(Shift)
     return ShiftByChannel
 
-def getShift(StepSize,shape,isRotate = True):
+def getShift(StepSize,shape,isRotate = True, isBinning = False):
     """
     isRotate is True for all images acquried after 2024, before 2024 is false
     """
     dim_x = shape[-1]
     dim_y = shape[-2]
+    print(dim_x,dim_y)
     scale = 2048/dim_y
+
+    if isBinning:
+        scale = 2
+    else:
+        scale = 1
+
     print("scale : ",scale)
     slope_y = -16/scale # pixel/µm
     offset_y = 0.1857/scale
@@ -286,12 +293,24 @@ if __name__ == "__main__":
     print("Author: Tzu-Lun Ohn @EMBL-imaging centre. v0.4 24-01-24")
     FolderName = filedialog.askdirectory(title="please select the folder containing the image and metadata files")
     #IsTime = simpledialog.askinteger(title="",prompt = "split time to different files?\nenter 0 for No and 1 for Yes")
+    IsRotate = messagebox.askquestion("","Is the image acquired after 2024?")
     IsTime = messagebox.askquestion("","split time to different files?")
+    IsBinning = messagebox.askquestion("","Is it binning of 2?")
+
+    if IsRotate == "yes":
+        isRotate = True
+    elif IsRotate == "no":
+        isRotate = False
 
     if IsTime == "yes":
         isTime = True
     elif IsTime == "no":
         isTime = False
+
+    if IsBinning == "yes":
+        isBinning = True
+    elif IsBinning == "no":
+        isBinning = False
 
     try:
         AllFolder = os.listdir(FolderName)
@@ -348,7 +367,7 @@ if __name__ == "__main__":
                 img = tif.asarray()
                 Shift = calibrateShift(img)
             else:
-                Shift = getShift(SliceStep,OriImageShape[-3:])
+                Shift = getShift(SliceStep,OriImageShape[-3:],isBinning=isBinning)
                 NewSize = getNewPageSize(OriImageShape[-3:],Shift)
             
             ImageShape = OriImageShape.copy()
