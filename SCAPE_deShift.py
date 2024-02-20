@@ -199,8 +199,13 @@ def getShift(StepSize,shape,isRotate = True, isBinning = False):
     else:
         scale = 1
 
+    if isRescale:
+        rescaleFactor = 0.4
+    else:
+        rescaleFactor = 1
+
     print("scale : ",scale)
-    slope_y = -16/scale # pixel/µm
+    slope_y = -16*rescaleFactor/scale # pixel/µm
     offset_y = 0.1857/scale
     slope_x = 0
     offset_x = 0
@@ -296,6 +301,7 @@ if __name__ == "__main__":
     IsRotate = messagebox.askquestion("","Is the image acquired after 2024?")
     IsTime = messagebox.askquestion("","split time to different files?")
     IsBinning = messagebox.askquestion("","Is it binning of 2?")
+    IsRescale = messagebox.askquestion("","Is the slope 70µm/°?")
 
     if IsRotate == "yes":
         isRotate = True
@@ -311,6 +317,11 @@ if __name__ == "__main__":
         isBinning = True
     elif IsBinning == "no":
         isBinning = False
+
+    if IsRescale == "yes":
+        isRescale = True
+    elif IsBinning == "no":
+        isRescale = False
 
     try:
         AllFolder = os.listdir(FolderName)
@@ -367,7 +378,7 @@ if __name__ == "__main__":
                 img = tif.asarray()
                 Shift = calibrateShift(img)
             else:
-                Shift = getShift(SliceStep,OriImageShape[-3:],isBinning=isBinning)
+                Shift = getShift(SliceStep,OriImageShape[-3:],isBinning=isBinning,isRotate = isRotate)
                 NewSize = getNewPageSize(OriImageShape[-3:],Shift)
             
             ImageShape = OriImageShape.copy()
