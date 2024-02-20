@@ -185,7 +185,7 @@ def calibrateShift(img):
         ShiftByChannel.append(Shift)
     return ShiftByChannel
 
-def getShift(StepSize,shape,isRotate = True, isBinning = False):
+def getShift(StepSize,shape,isRotate = True, isBinning = False, isRescale = True):
     """
     isRotate is True for all images acquried after 2024, before 2024 is false
     """
@@ -298,15 +298,9 @@ if __name__ == "__main__":
     print("Author: Tzu-Lun Ohn @EMBL-imaging centre. v0.4 24-01-24")
     FolderName = filedialog.askdirectory(title="please select the folder containing the image and metadata files")
     #IsTime = simpledialog.askinteger(title="",prompt = "split time to different files?\nenter 0 for No and 1 for Yes")
-    IsRotate = messagebox.askquestion("","Is the image acquired after 2024?")
     IsTime = messagebox.askquestion("","split time to different files?")
     IsBinning = messagebox.askquestion("","Is it binning of 2?")
     IsRescale = messagebox.askquestion("","Is the slope 70µm/°?")
-
-    if IsRotate == "yes":
-        isRotate = True
-    elif IsRotate == "no":
-        isRotate = False
 
     if IsTime == "yes":
         isTime = True
@@ -320,7 +314,7 @@ if __name__ == "__main__":
 
     if IsRescale == "yes":
         isRescale = True
-    elif IsBinning == "no":
+    elif IsRescale == "no":
         isRescale = False
 
     try:
@@ -371,14 +365,24 @@ if __name__ == "__main__":
             DimOrder = MetaDict["dimension_order"].name
             DimOrder = DimOrder.lower()
             OriImageShape = [MetaDict["size_t"],MetaDict["size_c"],MetaDict["size_z"],MetaDict["size_y"],MetaDict["size_x"]]
-            #ImageShape.reverse()
-            #ImageShape = tuple(ImageShape)
+
+            tags = tif.pages[0].tags#imagej_metadata
+            metadata = tif.imagej_metadata
+            Year = json.loads(metadata["Info"])
+            Year = Year["Date"] 
+            Year = int(Year[:4])
+
+            if Year < 2024:
+                isRotate = False
+            else:
+                isRotate = True
+
 
             if isCalibrate:
                 img = tif.asarray()
                 Shift = calibrateShift(img)
             else:
-                Shift = getShift(SliceStep,OriImageShape[-3:],isBinning=isBinning,isRotate = isRotate)
+                Shift = getShift(SliceStep,OriImageShape[-3:],isBinning=isBinning,isRotate = isRotate, isRescale = isRescale)
                 NewSize = getNewPageSize(OriImageShape[-3:],Shift)
             
             ImageShape = OriImageShape.copy()
@@ -387,8 +391,6 @@ if __name__ == "__main__":
             ImageShape = tuple(ImageShape)
             print(ImageShape)
 
-            tags = tif.pages[0].tags#imagej_metadata
-            metadata = tif.imagej_metadata
             """
             with open("OME.xml","w") as xml:
                 xml.write(tags["ImageDescription"].value)
@@ -409,48 +411,6 @@ if __name__ == "__main__":
             MetaDict = MetaDict["pixels"]
             createImage(FileName,ImageShape,metadata,MetaDict,OriImageShape,NewSize,isTime)
             
-            """            
-        ColorImg = list()
-        #print(img.shape)
-        match img.ndim:
-            case 4:
-                metadata["axes"] = "ZYX"
-                for n in range(img.shape[1]):
-                    ColorImg.append(img[:,n,:,:])
-            case 5:
-                metadata["axes"] = "TZYX"
-                for n in range(img.shape[2]):
-                    ColorImg.append(img[0:10,:,n,:,:])                
-            case other:
-                if ChannelNo == 1:
-                    ColorImg.append(img)
-                else:
-                    for idx in range(ChannelNo):
-                        CurrentChannel = list()
-                        for ind in range(0,img.shape[0],ChannelNo):
-                            CurrentChannel.append(ind+idx)
-                        ColorImg.append(np.asarray(CurrentChannel))
-
-        if os.path.isdir("Deskew"):
-            print("there are old deskewed images, please delete them for the new processing")
-            input("finished...")
-            exit()
-        else:
-            os.mkdir("Deskew")
-            os.chdir("Deskew")
-        
-        print("pixel size: %.3f µm"%(0.097))
-        
-        for idx,AImage in enumerate(ColorImg):
-            shift_x = int(np.round(Shift[0]))
-            shift_y = int(np.round(Shift[1]))
-            #NewFileName = FileName[0]+"/"+"Deskew_"+FileName[1][0:-4]+"_Channel"+str(idx+1)+".tif"
-            NewFileName = "Deskew_"+FileName[1][0:-4]+"_Channel"+str(idx+1)+".tif"
-            NewImage = formNewImage(AImage,[shift_x,shift_y])
-            print("Writing channel",idx+1)
-            TFF.imwrite(NewFileName,NewImage,dtype = np.uint16,resolution=(1/0.097,1/0.097),metadata = metadata,ome = True, bigtiff=True)
-            #TFF.memmap(NewFileName,NewImage,shape=NewImage.shape,dtype = np.uint16,resolution=(1/0.097,1/0.097),metadata = metadata,ome = True, bigtiff=True)
-        """
     input("finished...")
         #TFF.imwrite(NewFileName,NewImage)
     #"""
