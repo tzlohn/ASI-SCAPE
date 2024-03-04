@@ -5,9 +5,10 @@ import tkinter as tk
 from tkinter import filedialog,simpledialog,messagebox
 import multiprocessing as mp
 from multiprocessing import get_context
-import json,os,glob
+import json,os,glob,sys
 from ome_types import to_dict, from_tiff,OME
-
+from PyQt5 import QtWidgets
+import logging
 
 def calcShift(Frame1,Frame2):
     Ff1 = fft2(Frame1)
@@ -229,9 +230,6 @@ def getDataSize(shape,dtype):
     #return kbyte
     return pixel*digit/1024
 
-def getSingleFileSize(DimOrder,Shape,DataSize):
-    pass
-
 def createImage(FileName,ImageShape,metadata,MetaDict,OriImageShape,NewSize,isTime = False):
     if not isTime:
         NewFileName = "Deskew_"+FileName+".ome.tif"
@@ -281,6 +279,31 @@ def createImage(FileName,ImageShape,metadata,MetaDict,OriImageShape,NewSize,isTi
             else:
                 for img in ImgList:
                     img.flush()
+            tif.close()
+
+def createImageNoMeta(AllTiffName,ImageShape,Shfit,OldShape,NewSize,ZLayerNo):
+    NameTemplate = AllTif[0][0:-8]
+    Remainder = 0
+    metadata = dict()
+    metadata["axes"] = "ZYX"
+    for aTiff in sorted(AllTiffName):
+        print(aTiff,Remainder)
+        with TFF.TiffFile(aTiff) as tif:
+            for idx in range(len(tif.pages)):
+                data = tif.pages[idx].asarray()
+                if idx == 0:
+                    TFF.imwrite("temp_"+aTiff,data)
+                RealPageNo = Remainder%ZLayerNo
+                if RealPageNo == 0:
+                    NewFileName = "Deskew_"+NameTemplate+"_"+str(Remainder//ZLayerNo)+".tif"
+                    img =TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, metadata = metadata, bigtiff = True)
+                    print(NewFileName)
+                [start_x,end_x,start_y,end_y] = getAssignCoordinate(Shift,OldShape,RealPageNo,int(NewSize[-2]),int(NewSize[-1]))
+                img[RealPageNo,start_x:end_x,start_y:end_y] = data
+                img.flush()
+
+                #print(aTiff,idx)
+                Remainder = Remainder+1                
             tif.close()
 
 if __name__ == "__main__":
@@ -354,9 +377,9 @@ if __name__ == "__main__":
         #UpperLayer = simpledialog.askinteger("z range","please enter the first layer for deskewing:\nstart from 1")-1
         #LowerLayer = simpledialog.askinteger("z range","please enter the last layer for deskewing:")-1
 
-
+    try:
         with TFF.TiffFile(ImgName) as tif:            
-            #img = TFF.memmap("test.tif",shape = tif.pages[0].shape) 
+            #img = TFF.memmap("test.tif",shape = tif.pages[0].shape)                      
             OMEmeta = to_dict(tif.ome_metadata)
             MetaList = OMEmeta["images"]
             MetaDict = MetaList[0]
@@ -368,9 +391,12 @@ if __name__ == "__main__":
 
             tags = tif.pages[0].tags#imagej_metadata
             metadata = tif.imagej_metadata
-            Year = json.loads(metadata["Info"])
-            Year = Year["Date"] 
-            Year = int(Year[:4])
+            try:
+                Year = json.loads(metadata["Info"])
+                Year = Year["Date"] 
+                Year = int(Year[:4])
+            except:
+                Year = 2024
 
             if Year < 2024:
                 isRotate = False
@@ -384,7 +410,7 @@ if __name__ == "__main__":
             else:
                 Shift = getShift(SliceStep,OriImageShape[-3:],isBinning=isBinning,isRotate = isRotate, isRescale = isRescale)
                 NewSize = getNewPageSize(OriImageShape[-3:],Shift)
-            
+        
             ImageShape = OriImageShape.copy()
             ImageShape[-2] = int(NewSize[-2])
             ImageShape[-1] = int(NewSize[-1])
@@ -410,7 +436,36 @@ if __name__ == "__main__":
             FileName = MetaDict["name"]
             MetaDict = MetaDict["pixels"]
             createImage(FileName,ImageShape,metadata,MetaDict,OriImageShape,NewSize,isTime)
+    
+    except:
+        app = QtWidgets.QApplication(sys.argv)
+        w = QtWidgets.QWidget()
+        MsgBox = QtWidgets.QMessageBox(w)
+        MsgBox.setWindowTitle("Reading tiff error:")
+        MsgBox.setText("can't read metadata correctly")
+        MsgBox.setIcon(QtWidgets.QMessageBox.Critical)
+        MsgBox.exec_()
+
+        IsRotate = messagebox.askquestion("","Was camera rotated?")
+        if IsRotate == "yes":
+            isRotate = True
+        elif IsRotate == "no":
+            isRotate = False
+        
+        with TFF.TiffFile(ImgName) as tif:
+            OriShape = tif.pages[0].shape
+            tif.close()
+        OriShape = [SliceNo] + list(OriShape)
+
+        Shift = getShift(SliceStep,OriShape,isBinning=isBinning,isRotate = isRotate, isRescale = isRescale)
+        NewSize = getNewPageSize(OriShape,Shift)
+        ImageShape = OriShape.copy()
+        ImageShape[-2] = int(NewSize[-2])
+        ImageShape[-1] = int(NewSize[-1])
+        ImageShape = tuple(ImageShape)
+        print(ImageShape)
+        
+        createImageNoMeta(AllTif,ImageShape,Shift,OriShape,NewSize,SliceNo)
+
             
     input("finished...")
-        #TFF.imwrite(NewFileName,NewImage)
-    #"""
