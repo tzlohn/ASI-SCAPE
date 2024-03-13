@@ -269,9 +269,9 @@ def createImage(FileName,ImageShape,metadata,MetaDict,OriImageShape,NewSize,isTi
                 #print([start_x,end_x,start_y,end_y])
                 try:
                     if not isTime:
-                        img[Time,ChannelNo,ZPos,start_x:end_x,start_y:end_y] = data
+                        img[Time,ChannelNo,ZPos,start_x+1:end_x-1,start_y+1:end_y-1] = data[1:-1,1:-1]
                     else:
-                        ImgList[Time][ChannelNo,ZPos,start_x:end_x,start_y:end_y] = data
+                        ImgList[Time][ChannelNo,ZPos,start_x+1:end_x-1,start_y+1:end_y-1] = data[1:-1,1:-1]
                 except:
                     print("OME-metadata has a wrong index",ChannelNo,Time,ZPos)
             if not isTime:   
@@ -299,7 +299,7 @@ def createImageNoMeta(AllTiffName,ImageShape,Shfit,OldShape,NewSize,ZLayerNo):
                     img =TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, metadata = metadata, bigtiff = True)
                     print(NewFileName)
                 [start_x,end_x,start_y,end_y] = getAssignCoordinate(Shift,OldShape,RealPageNo,int(NewSize[-2]),int(NewSize[-1]))
-                img[RealPageNo,start_x:end_x,start_y:end_y] = data
+                img[RealPageNo,start_x+1:end_x-1,start_y+1:end_y-1] = data[1:-1,1:-1]
                 img.flush()
 
                 #print(aTiff,idx)
@@ -381,6 +381,7 @@ if __name__ == "__main__":
         with TFF.TiffFile(ImgName) as tif:            
             #img = TFF.memmap("test.tif",shape = tif.pages[0].shape)                      
             OMEmeta = to_dict(tif.ome_metadata)
+            #print(OMEmeta)
             MetaList = OMEmeta["images"]
             MetaDict = MetaList[0]
             MetaDict = MetaDict["pixels"]
