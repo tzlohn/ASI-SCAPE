@@ -2,7 +2,7 @@ from PyQt5.QtWidgets import *
 from PyQt5.QtCore import *
 import tifffile as TFF
 import numpy as np
-import sys,os,glob
+import sys,os,glob,json
 
 #HyperOrder = ["XYZC","XYZT","XYZCT","XYZTC","XYCZ","XYTZ"]
 HyperOrder = ["XYZCT","XYZTC"]
@@ -31,6 +31,7 @@ class UserInput(QWidget):
         self.FilePathLabel = QLabel(parent = self, text = "select the file folder:")
         self.FilePath = QLineEdit(self)
         self.FilePath.setText(os.getcwd())
+        self.FilePath.textChanged.connect(self.loadASImeta)
         self.BrowseButton = QPushButton(self) 
         self.BrowseButton.setText("Browse...")
         self.BrowseButton.clicked.connect(self.browseDir)
@@ -164,6 +165,34 @@ class UserInput(QWidget):
                     Remainder = Remainder+1                
                 tif.close()
             img.flush()
+    
+    def loadASImeta(self):
+        try:
+            PathName = self.FilePath.text()
+            StackMetadata = self.getSliceStep(PathName)
+            self.SliceStep = StackMetadata["stepSizeUm"]
+            ChannelNo = StackMetadata["numChannels"]
+            SliceNo = StackMetadata["numSlices"]
+            TimePoint = StackMetadata["numTimepoints"]
+            #print("Find slice step",SliceStep)
+            #print(StackMetadata)
+            self.ColorChannels.setValue(ChannelNo)
+            self.ZLayerNo.setValue(SliceNo)
+            self.TimePointNo.setValue(TimePoint)
+        except:
+            SliceStep = 1.1
+            StackMetadata = {"info":"No AcqSettings.txt"}
+            print("no AcqSettings.txt found")
+
+    def getSliceStep(self,FolderName):
+        FileName = FolderName + "/AcqSettings.txt"
+
+        with open(FileName) as file:
+            metadata = json.load(file)
+            file.close()
+    
+        return metadata
+
         
 if __name__ == "__main__":
     app = QApplication(sys.argv)

@@ -118,15 +118,6 @@ def formNewImage(RawImage,shift):
         
     return NewImage
 
-def getSliceStep(FolderName):
-    FileName = FolderName + "/AcqSettings.txt"
-
-    with open(FileName) as file:
-        metadata = json.load(file)
-        file.close()
-    
-    return metadata
-
 def combineMetadata(meta1,meta2):
     meta1.update(meta2)
     meta = str(meta1)
@@ -281,52 +272,6 @@ def createImage(FileName,ImageShape,metadata,MetaDict,OriImageShape,NewSize,isTi
                     img.flush()
             tif.close()
 
-def createImageNoMeta(AllTiffName,ImageShape,Shfit,OldShape,NewSize,ZLayerNo):
-    NameTemplate = AllTif[0][0:-8]
-    Remainder = 0
-    metadata = dict()
-    metadata["axes"] = "ZYX"
-
-    pageNo = 0
-    for aTiff in sorted(AllTiffName):
-        with TFF.TiffFile(aTiff) as tif:
-            pageNo = pageNo + len(tif.pages)
-
-    print("FF")
-    print(pageNo)
-    count = 0
-    ImageShape = list(ImageShape)
-    ImageShape[0] = pageNo
-    ImageShape = tuple(ImageShape)
-    NewFileName = "Deskew_"+NameTemplate+".tif"
-    img =TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, metadata = metadata, bigtiff = True)
-
-    for aTiff in AllTiffName:
-        print(aTiff,Remainder)
-        with TFF.TiffFile(aTiff) as tif:
-            for idx in range(len(tif.pages)):
-                data = tif.pages[idx].asarray()
-                """
-                if idx == 0:
-                    TFF.imwrite("temp_"+aTiff,data)
-                """
-                RealPageNo = Remainder%ZLayerNo
-                """
-                if RealPageNo == 0:
-                    NewFileName = "Deskew_"+NameTemplate+"_"+str(Remainder//ZLayerNo)+".tif"
-                    img =TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, metadata = metadata, bigtiff = True)
-                    print(NewFileName)
-                """
-                [start_x,end_x,start_y,end_y] = getAssignCoordinate(Shift,OldShape,RealPageNo,int(NewSize[-2]),int(NewSize[-1]))
-                #img[RealPageNo,start_x+1:end_x-1,start_y+1:end_y-1] = data[1:-1,1:-1]
-                img[count,start_x+1:end_x-1,start_y+1:end_y-1] = data[1:-1,1:-1]
-                count = count+1
-
-                #print(aTiff,idx)
-                Remainder = Remainder+1                
-            tif.close()
-        img.flush()
-
 if __name__ == "__main__":
 
     isCalibrate = False
@@ -361,92 +306,50 @@ if __name__ == "__main__":
     elif IsRescale == "no":
         isRescale = False
 
-    try:
-        StackMetadata = getSliceStep(FolderNamesss)
-        SliceStep = StackMetadata["stepSizeUm"]
-        ChannelNo = StackMetadata["numChannels"]
-        SliceNo = StackMetadata["numSlices"]
-        #print("Find slice step",SliceStep)
-        #print(StackMetadata)
-    except:
-        SliceStep = 1.1
-        StackMetadata = {"info":"No AcqSettings.txt"}
-        print("no AcqSettings.txt found")
-        #UpperLayer = simpledialog.askinteger("z range","please enter the first layer for deskewing:\nstart from 1")-1
-        #LowerLayer = simpledialog.askinteger("z range","please enter the last layer for deskewing:")-1
 
-    try:
-        with TFF.TiffFile(ImgName) as tif:            
-            #img = TFF.memmap("test.tif",shape = tif.pages[0].shape)                      
-            OriImageShape = [MetaDict["size_t"],MetaDict["size_c"],MetaDict["size_z"],MetaDict["size_y"],MetaDict["size_x"]]
-            tags = tif.pages[0].tags#imagej_metadata
-            metadata = tif.imagej_metadata
-            try:
-                Year = json.loads(metadata["Info"])
-                Year = Year["Date"] 
-                Year = int(Year[:4])
-            except:
-                Year = 2024
+    #UpperLayer = simpledialog.askinteger("z range","please enter the first layer for deskewing:\nstart from 1")-1
+    #LowerLayer = simpledialog.askinteger("z range","please enter the last layer for deskewing:")-1
 
-            if Year < 2024:
-                isRotate = False
-            else:
-                isRotate = True
+    with TFF.TiffFile(ImgName) as tif:            
+        #img = TFF.memmap("test.tif",shape = tif.pages[0].shape)                      
+        OriImageShape = [MetaDict["size_t"],MetaDict["size_c"],MetaDict["size_z"],MetaDict["size_y"],MetaDict["size_x"]]
+        tags = tif.pages[0].tags#imagej_metadata
+        metadata = tif.imagej_metadata
+        try:
+            Year = json.loads(metadata["Info"])
+            Year = Year["Date"] 
+            Year = int(Year[:4])
+        except:
+            Year = 2024
 
-
-            if isCalibrate:
-                img = tif.asarray()
-                Shift = calibrateShift(img)
-            else:
-                Shift = getShift(SliceStep,OriImageShape[-3:],isBinning=isBinning,isRotate = isRotate, isRescale = isRescale)
-                NewSize = getNewPageSize(OriImageShape[-3:],Shift)
-        
-            ImageShape = OriImageShape.copy()
-            ImageShape[-2] = int(NewSize[-2])
-            ImageShape[-1] = int(NewSize[-1])
-            ImageShape = tuple(ImageShape)
-            print(ImageShape)
-
-            """
-            with open("OME.xml","w") as xml:
-                xml.write(tags["ImageDescription"].value)
-                xml.close()
-            """
-            tif.close()
-            #print(metadata)
-        ImageSize = getDataSize(ImageShape,NumType)
-
-        createImage(FileName,ImageShape,metadata,MetaDict,OriImageShape,NewSize,isTime)
-    
-    except:
-        app = QtWidgets.QApplication(sys.argv)
-        w = QtWidgets.QWidget()
-        MsgBox = QtWidgets.QMessageBox(w)
-        MsgBox.setWindowTitle("Reading tiff error:")
-        MsgBox.setText("can't read metadata correctly")
-        MsgBox.setIcon(QtWidgets.QMessageBox.Critical)
-        MsgBox.exec_()
-
-        IsRotate = messagebox.askquestion("","Was camera rotated?")
-        if IsRotate == "yes":
-            isRotate = True
-        elif IsRotate == "no":
+        if Year < 2024:
             isRotate = False
-        
-        with TFF.TiffFile(ImgName) as tif:
-            OriShape = tif.pages[0].shape
-            tif.close()
-        OriShape = [SliceNo] + list(OriShape)
+        else:
+            isRotate = True
 
-        Shift = getShift(SliceStep,OriShape,isBinning=isBinning,isRotate = isRotate, isRescale = isRescale)
-        NewSize = getNewPageSize(OriShape,Shift)
-        ImageShape = OriShape.copy()
+
+        if isCalibrate:
+            img = tif.asarray()
+            Shift = calibrateShift(img)
+        else:
+            Shift = getShift(SliceStep,OriImageShape[-3:],isBinning=isBinning,isRotate = isRotate, isRescale = isRescale)
+            NewSize = getNewPageSize(OriImageShape[-3:],Shift)
+    
+        ImageShape = OriImageShape.copy()
         ImageShape[-2] = int(NewSize[-2])
         ImageShape[-1] = int(NewSize[-1])
         ImageShape = tuple(ImageShape)
         print(ImageShape)
-        
-        createImageNoMeta(AllTif,ImageShape,Shift,OriShape,NewSize,SliceNo)
 
-            
+        """
+        with open("OME.xml","w") as xml:
+            xml.write(tags["ImageDescription"].value)
+            xml.close()
+        """
+        tif.close()
+        #print(metadata)
+    ImageSize = getDataSize(ImageShape,NumType)
+
+    createImage(FileName,ImageShape,metadata,MetaDict,OriImageShape,NewSize,isTime)
+
     input("finished...")
