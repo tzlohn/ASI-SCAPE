@@ -362,55 +362,23 @@ if __name__ == "__main__":
         isRescale = False
 
     try:
-        AllFolder = os.listdir(FolderName)
+        StackMetadata = getSliceStep(FolderNamesss)
+        SliceStep = StackMetadata["stepSizeUm"]
+        ChannelNo = StackMetadata["numChannels"]
+        SliceNo = StackMetadata["numSlices"]
+        #print("Find slice step",SliceStep)
+        #print(StackMetadata)
     except:
-        FolderName = findFolderName(FolderName)
-        FolderName = FolderName[0]
-        AllFolder = os.listdir(FolderName)
-    #for aFolder in AllFolder:
-    for _ in range(1):
-        os.chdir(FolderName)
-        #os.chdir(aFolder)
-        cwd = os.getcwd()
-        AllTif = glob.glob("*.tif")
-        if len(AllTif) > 1:
-            for atif in AllTif:
-                if atif[0:6] == "Deskew":
-                    os.remove(atif)
-
-        iName = AllTif[0]
-        ImgName = cwd+"/"+iName
-        print(ImgName)
-    #"""
-    #for i in range(1):
-        FileName = findFolderName(ImgName)
-        try:
-            StackMetadata = getSliceStep(FileName[0])
-            SliceStep = StackMetadata["stepSizeUm"]
-            ChannelNo = StackMetadata["numChannels"]
-            SliceNo = StackMetadata["numSlices"]
-            #print("Find slice step",SliceStep)
-            #print(StackMetadata)
-        except:
-            SliceStep = 1.1
-            StackMetadata = {"info":"No AcqSettings.txt"}
-            print("no AcqSettings.txt found")
+        SliceStep = 1.1
+        StackMetadata = {"info":"No AcqSettings.txt"}
+        print("no AcqSettings.txt found")
         #UpperLayer = simpledialog.askinteger("z range","please enter the first layer for deskewing:\nstart from 1")-1
         #LowerLayer = simpledialog.askinteger("z range","please enter the last layer for deskewing:")-1
 
     try:
         with TFF.TiffFile(ImgName) as tif:            
             #img = TFF.memmap("test.tif",shape = tif.pages[0].shape)                      
-            OMEmeta = to_dict(tif.ome_metadata)
-            #print(OMEmeta)
-            MetaList = OMEmeta["images"]
-            MetaDict = MetaList[0]
-            MetaDict = MetaDict["pixels"]
-            NumType = MetaDict["type"].name
-            DimOrder = MetaDict["dimension_order"].name
-            DimOrder = DimOrder.lower()
             OriImageShape = [MetaDict["size_t"],MetaDict["size_c"],MetaDict["size_z"],MetaDict["size_y"],MetaDict["size_x"]]
-
             tags = tif.pages[0].tags#imagej_metadata
             metadata = tif.imagej_metadata
             try:
@@ -447,17 +415,8 @@ if __name__ == "__main__":
             tif.close()
             #print(metadata)
         ImageSize = getDataSize(ImageShape,NumType)
-        try:
-            meta = combineMetadata(json.loads(metadata["Info"]),StackMetadata)
-            metadata["Info"] = meta
-        except:
-            metadata = dict()
-        metadata["axes"] = "TCZYX"
 
-        for MetaDict in MetaList:
-            FileName = MetaDict["name"]
-            MetaDict = MetaDict["pixels"]
-            createImage(FileName,ImageShape,metadata,MetaDict,OriImageShape,NewSize,isTime)
+        createImage(FileName,ImageShape,metadata,MetaDict,OriImageShape,NewSize,isTime)
     
     except:
         app = QtWidgets.QApplication(sys.argv)
