@@ -286,25 +286,46 @@ def createImageNoMeta(AllTiffName,ImageShape,Shfit,OldShape,NewSize,ZLayerNo):
     Remainder = 0
     metadata = dict()
     metadata["axes"] = "ZYX"
+
+    pageNo = 0
     for aTiff in sorted(AllTiffName):
+        with TFF.TiffFile(aTiff) as tif:
+            pageNo = pageNo + len(tif.pages)
+
+    print("FF")
+    print(pageNo)
+    count = 0
+    ImageShape = list(ImageShape)
+    ImageShape[0] = pageNo
+    ImageShape = tuple(ImageShape)
+    NewFileName = "Deskew_"+NameTemplate+".tif"
+    img =TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, metadata = metadata, bigtiff = True)
+
+    for aTiff in AllTiffName:
         print(aTiff,Remainder)
         with TFF.TiffFile(aTiff) as tif:
             for idx in range(len(tif.pages)):
                 data = tif.pages[idx].asarray()
+                """
                 if idx == 0:
                     TFF.imwrite("temp_"+aTiff,data)
+                """
                 RealPageNo = Remainder%ZLayerNo
+                """
                 if RealPageNo == 0:
                     NewFileName = "Deskew_"+NameTemplate+"_"+str(Remainder//ZLayerNo)+".tif"
                     img =TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, metadata = metadata, bigtiff = True)
                     print(NewFileName)
+                """
                 [start_x,end_x,start_y,end_y] = getAssignCoordinate(Shift,OldShape,RealPageNo,int(NewSize[-2]),int(NewSize[-1]))
-                img[RealPageNo,start_x+1:end_x-1,start_y+1:end_y-1] = data[1:-1,1:-1]
-                img.flush()
+                #img[RealPageNo,start_x+1:end_x-1,start_y+1:end_y-1] = data[1:-1,1:-1]
+                img[count,start_x+1:end_x-1,start_y+1:end_y-1] = data[1:-1,1:-1]
+                count = count+1
 
                 #print(aTiff,idx)
                 Remainder = Remainder+1                
             tif.close()
+        img.flush()
 
 if __name__ == "__main__":
 
@@ -318,7 +339,7 @@ if __name__ == "__main__":
     #ImgName = filedialog.askopenfilename()
     #"""
     print("This app is for de-shifting the image acquired by the EMBL configuration of ASI-SCAPE")
-    print("Author: Tzu-Lun Ohn @EMBL-imaging centre. v0.4 24-01-24")
+    print("Author: Tzu-Lun Ohn @EMBL-imaging centre. v0.5 26-03-24")
     FolderName = filedialog.askdirectory(title="please select the folder containing the image and metadata files")
     #IsTime = simpledialog.askinteger(title="",prompt = "split time to different files?\nenter 0 for No and 1 for Yes")
     IsTime = messagebox.askquestion("","split time to different files?")
