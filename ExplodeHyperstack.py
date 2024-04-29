@@ -103,7 +103,7 @@ class BackShift(QGroupBox):
                 print(ImageShape)
                 tif.close()
 
-            self.createImage(ImgName,ImageShape,metadata,OriImageShape,NewSize)
+            self.createImage(ImgName,ImageShape,metadata,OriImageShape,NewSize,Shift)
     
     def getNewPageSize(self,PageSize,Shift):
         Shape = [PageSize[1]+PageSize[0]*abs(Shift[0]),PageSize[2]+PageSize[0]*abs(Shift[1])]    
@@ -218,7 +218,7 @@ class BackShift(QGroupBox):
             
         return NewImage
 
-    def createImage(self,FileName,ImageShape,metadata,OriImageShape,NewSize):
+    def createImage(self,FileName,ImageShape,metadata,OriImageShape,NewSize,Shift):
         NewFileName = "Deskew_"+FileName
         img =TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, metadata = metadata, bigtiff = True)
            
@@ -228,9 +228,14 @@ class BackShift(QGroupBox):
                 [start_x,end_x,start_y,end_y] = self.getAssignCoordinate(Shift,OriImageShape,ZPos,int(NewSize[-2]),int(NewSize[-1]))
                 img[ZPos,start_x+1:end_x-1,start_y+1:end_y-1] = data[1:-1,1:-1]
             tif.close()
+
+        if self.MaxProj.isChecked():
+            MaxProjName = "MaxProj_"+NewFileName
+            TFF.imwrite(MaxProjName,np.max(img,axis = 0))
+
         img.flush()
 
-class UserInput(QWidget):
+class BreakHyperstack(QWidget):
     def __init__(self):
         super().__init__()
 
@@ -412,6 +417,6 @@ class UserInput(QWidget):
         
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    win = UserInput()
+    win = BreakHyperstack()
     win.show()
     sys.exit(app.exec_())
