@@ -23,6 +23,24 @@ def sortName(Names:list):
     
     return NewList
 
+class BackShift(QGroupBox):
+    def __init__(self):
+        super().__init__()
+
+        self.BinningLabel = QLabel(parent = self, text= "Binning:")
+        self.Binning = QSpinBox(self)
+        self.Binning.setMinimum(1)
+        self.Binning.setMaximum(2)
+        self.Binning.setSingleStep(1)
+        self.Binning.setValue(1)
+
+        self.SlopeLabel = QLabel(parent = self, text = "Step size to angle ratio:")
+        self.SlopeLabel = QComboBox(self)
+        self.SlopeLabel.addItems(["70µm/°","35µm/°"])
+
+        self.CamRotateBox = QCheckBox(self)
+        self.CamRotateBox.setText("Is camera rotated (2024 configuration)?")
+
 class UserInput(QWidget):
     def __init__(self):
         super().__init__()
