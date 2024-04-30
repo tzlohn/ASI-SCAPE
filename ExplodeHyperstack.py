@@ -37,6 +37,8 @@ class SortWorker(QObject):
                     os.remove(atif)
         AllTif = sortName(AllTif)
 
+        NewFileNames = dict()
+
         ZLayerNo = self.SortWin.ZLayerNo.value()
         NameTemplate = AllTif[0][0:-8]
         Remainder = 0
@@ -49,9 +51,9 @@ class SortWorker(QObject):
                     data = tif.pages[idx].asarray()
                     RealPageNo = Remainder%ZLayerNo
                     if RealPageNo == 0:
-                        SN = self.SortWin.getNamePost(count)
-                        NewFileName = NameTemplate+"_"+SN+".tiff"
-                        self.SortWin.NewFileNames.append(NewFileName)
+                        [SNstr,SN] = self.SortWin.getNamePost(count)
+                        NewFileName = NameTemplate+"_"+SNstr+".tiff"
+                        NewFileNames[NewFileName] = SN
                         count = count+1
                         img =TFF.memmap(NewFileName,shape=(ZLayerNo,data.shape[0],data.shape[1]), dtype=np.uint16, metadata = {"axes":"ZYX"}, bigtiff = True)                        
                     img[RealPageNo,:,:] = data
@@ -59,8 +61,53 @@ class SortWorker(QObject):
                 tif.close()
             img.flush()
         
-        self.SortWin.MainWin.sig_openDeskew.emit()
+        self.SortWin.MainWin.sig_openDeskew.emit(NewFileNames)
+
+class DeskewWorker(QObject):
+    def __init__(self,parent):
+        super().__init__()
+        self.ShiftWin = parent
     
+    def createImage(self):
+        ImgNames = self.pars["ImgNames"]
+        ImageShape = self.pars["ImageShape"]
+        metadata = self.pars["metadata"]
+        OriImageShape = self.pars["OriImageShape"]
+        NewSize = self.pars["NewSize"]
+        Shift = self.pars["Shift"]
+
+        for FileName in ImgNames:
+            print("Deskewing %s..."%FileName)
+            NewFileName = "Deskew_"+FileName
+            img =TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, metadata = metadata, bigtiff = True)
+                
+            with TFF.TiffFile(FileName) as tif:
+                for ZPos,page in enumerate(tif.pages):
+                    data = page.asarray()
+                    [start_x,end_x,start_y,end_y] = self.ShiftWin.getAssignCoordinate(Shift,OriImageShape,ZPos,int(NewSize[-2]),int(NewSize[-1]))
+                    img[ZPos,start_x+1:end_x-1,start_y+1:end_y-1] = data[1:-1,1:-1]
+                tif.close()
+
+            if self.ShiftWin.MaxProj.isChecked():
+                MaxProjName = "MaxProj_"+NewFileName
+                TFF.imwrite(MaxProjName,np.max(img,axis = 0))
+        
+    def setParameters(self,pars):
+        self.pars = dict()
+        self.pars["ImgNames"] = pars[0]
+        self.pars["ImageShape"] = pars[1]
+        self.pars["metadata"] = pars[2]
+        self.pars["OriImageShape"] = pars[3]
+        self.pars["NewSize"] = pars[4]
+        self.pars["Shift"] = pars[5]
+
+class Hyperstack(QGroupBox):
+    def __init__(self,parent):
+        super().__init__()
+
+        self.DeskewWin = parent
+        self.setTitle("Hyperstack")
+
 class BackShift(QGroupBox):
     def __init__(self,parent):
         super().__init__()
@@ -110,7 +157,12 @@ class BackShift(QGroupBox):
         self.Layout.addWidget(self.Deskew,7,0,1,4)
 
         self.setLayout(self.Layout)
-    
+
+        self.DeskewThread = QThread(self)
+        self.DeskewWorker = DeskewWorker(self)
+        self.DeskewWorker.moveToThread(self.DeskewThread)
+        self.DeskewThread.started.connect(self.DeskewWorker.createImage)
+
     def setSelectState(self):
         if self.SelectAll.isChecked():
             self.selectImage.setDisabled(True)
@@ -118,32 +170,42 @@ class BackShift(QGroupBox):
             self.selectImage.setEnabled(True)
     
     def deskewImages(self):
+        if self.DeskewThread.isRunning():
+            MsgBox = QMessageBox(self)
+            MsgBox.setWindowTitle("Deskewing")
+            MsgBox.setText("A deskewing is undergoing")
+            MsgBox.setIcon(QMessageBox.Warning)
+            MsgBox.show()
+            return False
+        
         SliceStep = self.UIwin.SliceStep
 
         if not self.SelectAll.isChecked:
             ImgNames = [self.selectImage.currentText()]
         else:
             ImgNames = self.UIwin.NewFileNames
+        
+        ImgName = ImgNames[0]
+        with TFF.TiffFile(ImgName) as tif:                               
+            PageShape = tif.pages[0].asarray().shape
+            OriImageShape = [len(tif.pages),PageShape[0],PageShape[1]]
+            metadata = dict()
+            metadata["axes"] = "ZYX"
 
-        for ImgName in ImgNames:
-            with TFF.TiffFile(ImgName) as tif:
-                print("Deskewing %s..."%ImgName)                               
-                PageShape = tif.pages[0].asarray().shape
-                OriImageShape = [len(tif.pages),PageShape[0],PageShape[1]]
-                metadata = tif.imagej_metadata
-                metadata["axes"] = "ZYX"
+            Shift = self.getShift(SliceStep,OriImageShape)
+            NewSize = self.getNewPageSize(OriImageShape,Shift)
+        
+            ImageShape = OriImageShape.copy()
+            ImageShape[-2] = int(NewSize[-2])
+            ImageShape[-1] = int(NewSize[-1])
+            ImageShape = tuple(ImageShape)
+            print(ImageShape)
+            tif.close()
 
-                Shift = self.getShift(SliceStep,OriImageShape)
-                NewSize = self.getNewPageSize(OriImageShape,Shift)
-            
-                ImageShape = OriImageShape.copy()
-                ImageShape[-2] = int(NewSize[-2])
-                ImageShape[-1] = int(NewSize[-1])
-                ImageShape = tuple(ImageShape)
-                print(ImageShape)
-                tif.close()
+        self.DeskewWorker.setParameters([ImgNames,ImageShape,metadata,OriImageShape,NewSize,Shift])        
 
-            self.createImage(ImgName,ImageShape,metadata,OriImageShape,NewSize,Shift)
+        self.DeskewThread.start()
+        self.DeskewThread.quit()
     
     def getNewPageSize(self,PageSize,Shift):
         Shape = [PageSize[1]+PageSize[0]*abs(Shift[0]),PageSize[2]+PageSize[0]*abs(Shift[1])]    
@@ -214,23 +276,6 @@ class BackShift(QGroupBox):
             start_y = abs(offset_y-y_length)+z*shift[1]
         
         return [int(start_x),int(end_x),int(start_y),int(end_y)]
-
-    def createImage(self,FileName,ImageShape,metadata,OriImageShape,NewSize,Shift):
-        NewFileName = "Deskew_"+FileName
-        img =TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, metadata = metadata, bigtiff = True)
-           
-        with TFF.TiffFile(FileName) as tif:
-            for ZPos,page in enumerate(tif.pages):
-                data = page.asarray()
-                [start_x,end_x,start_y,end_y] = self.getAssignCoordinate(Shift,OriImageShape,ZPos,int(NewSize[-2]),int(NewSize[-1]))
-                img[ZPos,start_x+1:end_x-1,start_y+1:end_y-1] = data[1:-1,1:-1]
-            tif.close()
-
-        if self.MaxProj.isChecked():
-            MaxProjName = "MaxProj_"+NewFileName
-            TFF.imwrite(MaxProjName,np.max(img,axis = 0))
-
-        img.flush()
 
 class BreakHyperstack(QGroupBox):
     def __init__(self,parent):
@@ -349,11 +394,11 @@ class BreakHyperstack(QGroupBox):
             case "C":
                 keyNo = ChannelNo
                 TSN = "0"*(len(str(TimePointNo))-len(str(idx//keyNo)))+str(idx//keyNo)
-                return "C"+str(1+idx%keyNo)+"_T"+TSN
+                return ["C"+str(1+idx%keyNo)+"_T"+TSN,(idx%keyNo,idx//keyNo)]
             case "T":
                 keyNo = TimePointNo
                 TSN = "0"*(len(str(TimePointNo))-len(str(idx%keyNo)))+str(idx%keyNo)
-                return "T"+TSN+"_C"+str(1+idx//keyNo)
+                return ["T"+TSN+"_C"+str(1+idx//keyNo),(idx//keyNo,idx%keyNo)]
 
     def startSorting(self):
         CheckState = self.checkStart()
@@ -368,19 +413,16 @@ class BreakHyperstack(QGroupBox):
         self.startBreakdown()
 
     def startBreakdown(self):
-        self.NewFileNames = list()
-
         if self.BreakDownThread.isRunning():
             MsgBox = QMessageBox(self)
             MsgBox.setWindowTitle("Fire Warning")
             MsgBox.setText("The ome-tiff is under explosion!! Be patient!!")
-            MsgBox.setIcon(QMessageBox.Critical)
+            MsgBox.setIcon(QMessageBox.Warning)
             MsgBox.show()
             return False
         
         self.BreakDownThread.start()
         self.BreakDownThread.quit()
-
 
     def loadASImeta(self):
         try:
@@ -409,14 +451,14 @@ class BreakHyperstack(QGroupBox):
     
         return metadata
     
-    @pyqtSlot()
-    def openDeskew(self):
+    @pyqtSlot(dict)
+    def openDeskew(self,NewFileNames):
+        self.NewFileNames = list(NewFileNames.keys())
         self.DeskewGroup = BackShift(self)
-        #self.layout.addWidget(self.DeskewGroup,0,5,7,4)
         self.MainWin.Layout.addWidget(self.DeskewGroup,0,1,1,1)
-
+        
 class MainWin(QWidget):
-    sig_openDeskew = pyqtSignal()
+    sig_openDeskew = pyqtSignal(dict)
     def __init__(self):
         super().__init__()
 
