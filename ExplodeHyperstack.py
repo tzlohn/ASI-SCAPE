@@ -8,6 +8,7 @@ import sys,os,glob,json
 HyperOrder = ["XYZCT","XYZTC"]
 
 def sortName(Names:list):
+    #This function solves the file name sorting result with *_1.tif,*_10.tif,...*_19.tif,*_2.tif,*_20.tif
     NewList = list()
     for idx,aName in enumerate(Names):
         if idx == 0:
@@ -23,6 +24,43 @@ def sortName(Names:list):
     
     return NewList
 
+class SortWorker(QObject):
+    def __init__(self,parent):
+        super().__init__()
+        self.SortWin = parent
+    
+    def breakdown(self):
+        AllTif = glob.glob("*.tif")
+        if len(AllTif) > 1:
+            for atif in AllTif:
+                if atif[0:6] == "Deskew":
+                    os.remove(atif)
+        AllTif = sortName(AllTif)
+
+        ZLayerNo = self.SortWin.ZLayerNo.value()
+        NameTemplate = AllTif[0][0:-8]
+        Remainder = 0
+        count = 0
+        
+        for aTiff in AllTif:
+            print(aTiff,Remainder)
+            with TFF.TiffFile(aTiff) as tif:
+                for idx in range(len(tif.pages)):
+                    data = tif.pages[idx].asarray()
+                    RealPageNo = Remainder%ZLayerNo
+                    if RealPageNo == 0:
+                        SN = self.SortWin.getNamePost(count)
+                        NewFileName = NameTemplate+"_"+SN+".tiff"
+                        self.SortWin.NewFileNames.append(NewFileName)
+                        count = count+1
+                        img =TFF.memmap(NewFileName,shape=(ZLayerNo,data.shape[0],data.shape[1]), dtype=np.uint16, metadata = {"axes":"ZYX"}, bigtiff = True)                        
+                    img[RealPageNo,:,:] = data
+                    Remainder = Remainder+1                
+                tif.close()
+            img.flush()
+        
+        self.SortWin.MainWin.sig_openDeskew.emit()
+    
 class BackShift(QGroupBox):
     def __init__(self,parent):
         super().__init__()
@@ -88,10 +126,12 @@ class BackShift(QGroupBox):
             ImgNames = self.UIwin.NewFileNames
 
         for ImgName in ImgNames:
-            with TFF.TiffFile(ImgName) as tif:            
-                #img = TFF.memmap("test.tif",shape = tif.pages[0].shape)                      
-                OriImageShape = tif.pages[0].asarray().shape
+            with TFF.TiffFile(ImgName) as tif:
+                print("Deskewing %s..."%ImgName)                               
+                PageShape = tif.pages[0].asarray().shape
+                OriImageShape = [len(tif.pages),PageShape[0],PageShape[1]]
                 metadata = tif.imagej_metadata
+                metadata["axes"] = "ZYX"
 
                 Shift = self.getShift(SliceStep,OriImageShape)
                 NewSize = self.getNewPageSize(OriImageShape,Shift)
@@ -127,7 +167,6 @@ class BackShift(QGroupBox):
 
         dim_x = shape[-1]
         dim_y = shape[-2]
-        print(dim_x,dim_y)
         scale = 2048/dim_y
 
         if isBinning:
@@ -140,7 +179,7 @@ class BackShift(QGroupBox):
         else:
             rescaleFactor = 1
 
-        print("scale : ",scale)
+        #print("scale : ",scale)
         slope_y = -16*rescaleFactor/scale # pixel/µm
         offset_y = 0.1857/scale
         slope_x = 0
@@ -176,48 +215,6 @@ class BackShift(QGroupBox):
         
         return [int(start_x),int(end_x),int(start_y),int(end_y)]
 
-    def formNewImage(RawImage,shift):
-        match len(RawImage.shape):
-            case 3:
-                idx_offset = 0
-                Shape = [RawImage.shape[0],RawImage.shape[1]+RawImage.shape[0]*abs(shift[0]),RawImage.shape[2]+RawImage.shape[0]*abs(shift[1])]
-            case 4:
-                idx_offset = 1
-                Shape = [RawImage.shape[0],RawImage.shape[1],RawImage.shape[2]+RawImage.shape[1]*abs(shift[0]),RawImage.shape[3]+RawImage.shape[1]*abs(shift[1])]
-        NewImage = np.zeros(shape = Shape,dtype=RawImage.dtype)
-        layer = RawImage.shape[0+idx_offset]
-        x_length = RawImage.shape[1+idx_offset]
-        y_length = RawImage.shape[2+idx_offset]
-        for z in range(layer):
-            if shift[0] > 0:
-                offset_x = 0
-                start_x = offset_x + z*shift[0]
-                end_x = abs(offset_x-x_length)+z*shift[0]
-            else:
-                offset_x = NewImage.shape[1+idx_offset]
-                end_x = offset_x + z*shift[0]
-                start_x = abs(offset_x-x_length)+z*shift[0]
-            
-            if shift[0] > 0:
-                offset_y = 0
-                start_y = offset_y + z*shift[1]
-                end_y = abs(offset_y-y_length)+z*shift[1]
-            else:
-                offset_y = NewImage.shape[2+idx_offset]
-                end_y = offset_y + z*shift[1]
-                start_y = abs(offset_y-y_length)+z*shift[1]
-            try:
-                match len(RawImage.shape):
-                    case 3:
-                        NewImage[z,start_x:end_x,start_y:end_y] = RawImage[z,:,:]
-                    case 4:
-                        NewImage[:,z,start_x:end_x,start_y:end_y] = RawImage[:,z,:,:]    
-            except:
-                #pass
-                print(z,start_x,end_x,start_y,end_y)
-            
-        return NewImage
-
     def createImage(self,FileName,ImageShape,metadata,OriImageShape,NewSize,Shift):
         NewFileName = "Deskew_"+FileName
         img =TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, metadata = metadata, bigtiff = True)
@@ -235,12 +232,15 @@ class BackShift(QGroupBox):
 
         img.flush()
 
-class BreakHyperstack(QWidget):
-    def __init__(self):
+class BreakHyperstack(QGroupBox):
+    def __init__(self,parent):
         super().__init__()
 
-        self.setWindowTitle("Explode OME-TIFF")
-        self.FilePathLabel = QLabel(parent = self, text = "select the file folder:")
+        self.MainWin = parent
+        self.MainWin.sig_openDeskew.connect(self.openDeskew)
+
+        self.setTitle("Explode OME-TIFF")
+        self.FilePathLabel = QLabel(parent = self, text = "Select a folder with images:")
         self.FilePath = QLineEdit(self)
         self.FilePath.setText(os.getcwd())
         self.FilePath.textChanged.connect(self.loadASImeta)
@@ -252,6 +252,8 @@ class BreakHyperstack(QWidget):
         self.HyperStackOrder.addItems(HyperOrder)
         self.HyperStackLabel = QLabel(parent = self, text = "Hyperstack order:")
         self.HyperStackOrder.currentTextChanged.connect(self.setEnableStates)
+        self.HyperStackCB = QCheckBox(self)
+        self.HyperStackCB.stateChanged.connect(self.checkStart)  
 
         self.ZLayerLabel = QLabel(parent = self, text = "No. of Z layers:")
         self.ZLayerNo = QSpinBox(self)
@@ -260,6 +262,7 @@ class BreakHyperstack(QWidget):
         self.ZLayerNo.setSingleStep(1)
         self.ZLayerNo.setValue(1)
         self.ZLayerCB = QCheckBox(self)
+        self.ZLayerCB.stateChanged.connect(self.checkStart)
 
         self.ColorChannelLabel = QLabel(parent = self, text = "No. of channels:")
         self.ColorChannels = QSpinBox(self)
@@ -267,7 +270,8 @@ class BreakHyperstack(QWidget):
         self.ColorChannels.setMaximum(5)
         self.ColorChannels.setSingleStep(1)
         self.ColorChannels.setValue(1)
-        self.ColorChannelCB = QCheckBox(self)         
+        self.ColorChannelCB = QCheckBox(self)
+        self.ColorChannelCB.stateChanged.connect(self.checkStart)         
 
         self.TimePointLabel = QLabel(parent = self, text = "No. of time points:")
         self.TimePointNo = QSpinBox(self)
@@ -275,17 +279,20 @@ class BreakHyperstack(QWidget):
         self.TimePointNo.setMaximum(100000)
         self.TimePointNo.setSingleStep(1)
         self.TimePointNo.setValue(1) 
-        self.TimePoinitCB = QCheckBox(self)
+        self.TimePointCB = QCheckBox(self)
+        self.TimePointCB.stateChanged.connect(self.checkStart)      
 
-        self.SortHyperStack = QPushButton("Start sorting")
+        self.SortHyperStack = QPushButton("Break down ome-tiff")
         self.SortHyperStack.clicked.connect(self.startSorting)
+        self.SortHyperStack.setDisabled(True)
 
         self.layout = QGridLayout(self)
         self.layout.addWidget(self.FilePathLabel,0,0,1,2)
-        self.layout.addWidget(self.BrowseButton,0,2,1,2)
-        self.layout.addWidget(self.FilePath,1,0,1,4)
+        self.layout.addWidget(self.BrowseButton,0,3,1,2)
+        self.layout.addWidget(self.FilePath,1,0,1,5)
         self.layout.addWidget(self.HyperStackLabel,2,0,1,2)
         self.layout.addWidget(self.HyperStackOrder,2,2,1,2)
+        self.layout.addWidget(self.HyperStackCB,2,4,1,1)
         self.layout.addWidget(self.ZLayerLabel,3,0,1,2)
         self.layout.addWidget(self.ZLayerNo,3,2,1,2)
         self.layout.addWidget(self.ZLayerCB,3,4,1,1)
@@ -294,34 +301,44 @@ class BreakHyperstack(QWidget):
         self.layout.addWidget(self.ColorChannelCB,4,4,1,1)
         self.layout.addWidget(self.TimePointLabel,5,0,1,2)
         self.layout.addWidget(self.TimePointNo,5,2,1,2)
-        self.layout.addWidget(self.TimePoinitCB,5,4,1,1)
-        self.layout.addWidget(self.SortHyperStack,6,2,1,2)
+        self.layout.addWidget(self.TimePointCB,5,4,1,1)
+        self.layout.addWidget(self.SortHyperStack,6,0,1,5)
 
         self.setLayout(self.layout)
 
-        self.NewFileNames = ["test1.tif","test2.tif"]
-        self.openDeskew()        
+        self.BreakDownThread = QThread(self)
+        self.BreakDownWorker = SortWorker(self)
+        self.BreakDownWorker.moveToThread(self.BreakDownThread)
+        self.BreakDownThread.started.connect(self.BreakDownWorker.breakdown)
+        #self.NewFileNames = ["test1.tif","test2.tif"]
+        #self.openDeskew()        
 
     def browseDir(self):
         ImageDir = QFileDialog.getExistingDirectory(self,"select the dir for saving images")
         self.FilePath.setText(ImageDir)
+        os.chdir(self.FilePath.text())
 
     def setEnableStates(self):
         pass
 
     def checkStart(self):
-        if self.TimePointNo.isEnabled():
-            if not self.TimePoinitCB.isChecked():
-                return False
-        
-        if self.ZLayerNo.isEnabled():
-            if not self.ZLayerCB.isChecked():
-                return False
+        if not self.HyperStackCB.isChecked():
+            self.SortHyperStack.setDisabled(True)
+            return False
 
-        if self.ColorChannels.isEnabled():
-            if not self.ColorChannelCB.isChecked():
-                return False
+        if not self.TimePointCB.isChecked():
+            self.SortHyperStack.setDisabled(True)
+            return False
+    
+        if not self.ZLayerCB.isChecked():
+            self.SortHyperStack.setDisabled(True)
+            return False
 
+        if not self.ColorChannelCB.isChecked():
+            self.SortHyperStack.setDisabled(True)
+            return False
+
+        self.SortHyperStack.setEnabled(True)
         return True
 
     def getNamePost(self,idx):            
@@ -337,7 +354,6 @@ class BreakHyperstack(QWidget):
                 keyNo = TimePointNo
                 TSN = "0"*(len(str(TimePointNo))-len(str(idx%keyNo)))+str(idx%keyNo)
                 return "T"+TSN+"_C"+str(1+idx//keyNo)
-        
 
     def startSorting(self):
         CheckState = self.checkStart()
@@ -348,41 +364,24 @@ class BreakHyperstack(QWidget):
             MsgBox.setIcon(QMessageBox.Critical)
             MsgBox.show()
             return False
+        
+        self.startBreakdown()
 
-        os.chdir(self.FilePath.text())
-        AllTif = glob.glob("*.tif")
-        if len(AllTif) > 1:
-            for atif in AllTif:
-                if atif[0:6] == "Deskew":
-                    os.remove(atif)
-        AllTif = sortName(AllTif)
-
-        ZLayerNo = self.ZLayerNo.value()
-        NameTemplate = AllTif[0][0:-8]
-        Remainder = 0
-        count = 0
+    def startBreakdown(self):
         self.NewFileNames = list()
 
-        for aTiff in AllTif:
-            print(aTiff,Remainder)
-            with TFF.TiffFile(aTiff) as tif:
-                for idx in range(len(tif.pages)):
-                    data = tif.pages[idx].asarray()
-                    RealPageNo = Remainder%ZLayerNo
-                    if RealPageNo == 0:
-                        SN = self.getNamePost(count)
-                        #SN = "0"*(len(str(len(AllTif)-1))-len(str(count)))+str(count)
-                        NewFileName = NameTemplate+"_"+SN+".tiff"
-                        self.NewFileNames.append(NewFileName)
-                        count = count+1
-                        img =TFF.memmap(NewFileName,shape=(ZLayerNo,data.shape[0],data.shape[1]), dtype=np.uint16, metadata = {"axes":"ZYX"}, bigtiff = True)                        
-                    img[RealPageNo,:,:] = data
-                    Remainder = Remainder+1                
-                tif.close()
-            img.flush()
+        if self.BreakDownThread.isRunning():
+            MsgBox = QMessageBox(self)
+            MsgBox.setWindowTitle("Fire Warning")
+            MsgBox.setText("The ome-tiff is under explosion!! Be patient!!")
+            MsgBox.setIcon(QMessageBox.Critical)
+            MsgBox.show()
+            return False
+        
+        self.BreakDownThread.start()
+        self.BreakDownThread.quit()
 
-        self.openDeskew()
-    
+
     def loadASImeta(self):
         try:
             PathName = self.FilePath.text()
@@ -410,13 +409,26 @@ class BreakHyperstack(QWidget):
     
         return metadata
     
+    @pyqtSlot()
     def openDeskew(self):
         self.DeskewGroup = BackShift(self)
-        self.layout.addWidget(self.DeskewGroup,0,5,7,4)
+        #self.layout.addWidget(self.DeskewGroup,0,5,7,4)
+        self.MainWin.Layout.addWidget(self.DeskewGroup,0,1,1,1)
 
-        
+class MainWin(QWidget):
+    sig_openDeskew = pyqtSignal()
+    def __init__(self):
+        super().__init__()
+
+        self.setWindowTitle("ASI SCAPE deskewing tool")
+        BreakdownGroup = BreakHyperstack(self)
+
+        self.Layout = QGridLayout(self)
+        self.Layout.addWidget(BreakdownGroup,0,0,1,1)
+        self.setLayout(self.Layout)
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    win = BreakHyperstack()
+    win = MainWin()
     win.show()
     sys.exit(app.exec_())
