@@ -16,7 +16,7 @@ def sortName(Names:list):
             continue
         if len(aName) < len(NewList[-1]):
             n = len(NewList)-1
-            while len(NewList[n]) > len(aName):
+            while len(NewList[n]) > len(aName) and n > 0:
                 n = n-1
             NewList.insert(n+1,aName)
         else:
@@ -84,7 +84,7 @@ class DeskewWorker(QObject):
             with TFF.TiffFile(FileName) as tif:
                 for ZPos,page in enumerate(tif.pages):
                     data = page.asarray()
-                    [start_x,end_x,start_y,end_y] = self.ShiftWin.getAssignCoordinate(Shift,OriImageShape,ZPos,int(NewSize[-2]),int(NewSize[-1]))
+                    [start_x,end_x,start_y,end_y] = self.getAssignCoordinate(Shift,OriImageShape,ZPos,int(NewSize[-2]),int(NewSize[-1]))
                     img[ZPos,start_x+1:end_x-1,start_y+1:end_y-1] = data[1:-1,1:-1]
                 tif.close()
 
@@ -103,6 +103,29 @@ class DeskewWorker(QObject):
         self.pars["NewSize"] = pars[4]
         self.pars["Shift"] = pars[5]
 
+    def getAssignCoordinate(self,shift,shape,z,nx_length,ny_length):
+        x_length = shape[-2]
+        y_length = shape[-1]
+        if shift[0] > 0:
+            offset_x = 0
+            start_x = offset_x + z*shift[0]
+            end_x = abs(offset_x-x_length)+z*shift[0]
+        else:
+            offset_x = nx_length
+            end_x = offset_x + z*shift[0]
+            start_x = abs(offset_x-x_length)+z*shift[0]
+        
+        if shift[1] > 0:
+            offset_y = 0
+            start_y = offset_y + z*shift[1]
+            end_y = abs(offset_y-y_length)+z*shift[1]
+        else:
+            offset_y = ny_length
+            end_y = offset_y + z*shift[1]
+            start_y = abs(offset_y-y_length)+z*shift[1]
+        
+        return [int(start_x),int(end_x),int(start_y),int(end_y)]
+
 class Hyperstack(QGroupBox):
     def __init__(self,parent):
         super().__init__()
@@ -119,12 +142,15 @@ class Hyperstack(QGroupBox):
 
         self.MaxProjCB = QCheckBox(self)
         self.MaxProjCB.setText("Stacking max projection images")
-
+        if not self.DeskewWin.MaxProj.isChecked():
+            self.MaxProjCB.setDisabled(True)
+            
         self.DeleteCB = QCheckBox(self)
         self.DeleteCB.setText("Delete source images")
 
         self.CreateHyperstack = QPushButton(self)
         self.CreateHyperstack.setText("Create hyperstack image")
+        self.CreateHyperstack.clicked.connect(self.createHyperstack)
 
         self.Layout = QGridLayout(self)
         self.Layout.addWidget(self.TypeLabel,0,0,1,4)
@@ -132,7 +158,38 @@ class Hyperstack(QGroupBox):
         self.Layout.addWidget(self.MaxProjCB,2,0,1,4)
         self.Layout.addWidget(self.DeleteCB,3,0,1,4)
         self.Layout.addWidget(self.CreateHyperstack,4,0,1,4)
+    
+    def assembleHyperstack(self,MaxProj = False):
+        ImgNames = self.SortWin.NewFileNames
+        NewFileName = "temp.tif"
+        Metadict = dict()
+        Metadict["axes"] = self.HyperstackType.currentText()
 
+        LayerCount = 0
+        for idx,name in enumerate(ImgNames):
+            RealName = "Deskew_"+name
+            if MaxProj:
+                RealName = "MaxProj_"+RealName
+
+            with TFF.TiffFile(RealName) as tif:
+                Layers = len(tif.pages)
+                if idx == 0:
+                    DeskewShape = tif.pages[0].asarray().shape
+                    img = TFF.memmap(NewFileName,shape = (len(ImgNames)*Layers,DeskewShape[0],DeskewShape[1]),dtype = np.uint16, metadata = Metadict, bigtiff = True)
+
+                for ind,aFrame in enumerate(tif.pages):
+                    img[LayerCount+ind,:,:] = aFrame.asarray()
+
+                tif.close() 
+
+            img.flush()
+            LayerCount = LayerCount + Layers
+                
+    def createHyperstack(self):
+        self.assembleHyperstack()
+        if self.MaxProjCB.isChecked():
+            self.assembleHyperstack(MaxProj = True)
+      
 class BackShift(QGroupBox):
     def __init__(self,parent):
         super().__init__()
@@ -153,7 +210,7 @@ class BackShift(QGroupBox):
         self.Slope.addItems(["70µm/°","35µm/°"])
 
         self.CamRotateBox = QCheckBox(self)
-        self.CamRotateBox.setText("Was camera rotated (2024 configuration)?")
+        self.CamRotateBox.setText("Was the camera rotated (2024 configuration)?")
 
         self.selectImageLabel = QLabel(parent = self, text = "Select a file for deskew:")
         self.selectImage = QComboBox(self)
@@ -279,34 +336,11 @@ class BackShift(QGroupBox):
             return (shift_x,shift_y)
         else:
             return (-shift_y,shift_x)
-
-    def getAssignCoordinate(self,shift,shape,z,nx_length,ny_length):
-        x_length = shape[-2]
-        y_length = shape[-1]
-        if shift[0] > 0:
-            offset_x = 0
-            start_x = offset_x + z*shift[0]
-            end_x = abs(offset_x-x_length)+z*shift[0]
-        else:
-            offset_x = nx_length
-            end_x = offset_x + z*shift[0]
-            start_x = abs(offset_x-x_length)+z*shift[0]
-        
-        if shift[1] > 0:
-            offset_y = 0
-            start_y = offset_y + z*shift[1]
-            end_y = abs(offset_y-y_length)+z*shift[1]
-        else:
-            offset_y = ny_length
-            end_y = offset_y + z*shift[1]
-            start_y = abs(offset_y-y_length)+z*shift[1]
-        
-        return [int(start_x),int(end_x),int(start_y),int(end_y)]
     
     @pyqtSlot()
     def openHyperCreator(self):
         self.HyperGroup = Hyperstack(self)
-        self.UIwin.MainWin.Layout.addWidget(self.HyperGroup,0,2,1,1)
+        self.UIwin.MainWin.Layout.addWidget(self.HyperGroup,0,8,3,4)
         
 class BreakHyperstack(QGroupBox):
     def __init__(self,parent):
@@ -486,7 +520,7 @@ class BreakHyperstack(QGroupBox):
     def openDeskew(self,NewFileNames):
         self.NewFileNames = list(NewFileNames.keys())
         self.DeskewGroup = BackShift(self)
-        self.MainWin.Layout.addWidget(self.DeskewGroup,0,1,1,1)
+        self.MainWin.Layout.addWidget(self.DeskewGroup,0,4,4,4)
         
 class MainWin(QWidget):
     sig_openDeskew = pyqtSignal(dict)
@@ -498,7 +532,7 @@ class MainWin(QWidget):
         BreakdownGroup = BreakHyperstack(self)
 
         self.Layout = QGridLayout(self)
-        self.Layout.addWidget(BreakdownGroup,0,0,1,1)
+        self.Layout.addWidget(BreakdownGroup,0,0,4,4)
         self.setLayout(self.Layout)
 
 if __name__ == "__main__":
