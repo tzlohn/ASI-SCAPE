@@ -92,6 +92,8 @@ class DeskewWorker(QObject):
                 MaxProjName = "MaxProj_"+NewFileName
                 TFF.imwrite(MaxProjName,np.max(img,axis = 0))
         
+        self.ShiftWin.UIwin.MainWin.sig_openHyper.emit()
+        
     def setParameters(self,pars):
         self.pars = dict()
         self.pars["ImgNames"] = pars[0]
@@ -106,13 +108,37 @@ class Hyperstack(QGroupBox):
         super().__init__()
 
         self.DeskewWin = parent
+        self.SortWin = parent.UIwin
+        self.MainWin = self.SortWin.MainWin
+
         self.setTitle("Hyperstack")
+
+        self.TypeLabel = QLabel(parent = self, text = "Hyperstack type:")
+        self.HyperstackType = QComboBox(self)
+        self.HyperstackType.addItems(["XYZC","XYZT","XYZCT"])
+
+        self.MaxProjCB = QCheckBox(self)
+        self.MaxProjCB.setText("Stacking max projection images")
+
+        self.DeleteCB = QCheckBox(self)
+        self.DeleteCB.setText("Delete source images")
+
+        self.CreateHyperstack = QPushButton(self)
+        self.CreateHyperstack.setText("Create hyperstack image")
+
+        self.Layout = QGridLayout(self)
+        self.Layout.addWidget(self.TypeLabel,0,0,1,4)
+        self.Layout.addWidget(self.HyperstackType,1,0,1,4)
+        self.Layout.addWidget(self.MaxProjCB,2,0,1,4)
+        self.Layout.addWidget(self.DeleteCB,3,0,1,4)
+        self.Layout.addWidget(self.CreateHyperstack,4,0,1,4)
 
 class BackShift(QGroupBox):
     def __init__(self,parent):
         super().__init__()
 
         self.UIwin = parent
+        self.UIwin.MainWin.sig_openHyper.connect(self.openHyperCreator)
 
         self.setTitle("Deskew")
         self.BinningLabel = QLabel(parent = self, text= "Binning:")
@@ -276,7 +302,12 @@ class BackShift(QGroupBox):
             start_y = abs(offset_y-y_length)+z*shift[1]
         
         return [int(start_x),int(end_x),int(start_y),int(end_y)]
-
+    
+    @pyqtSlot()
+    def openHyperCreator(self):
+        self.HyperGroup = Hyperstack(self)
+        self.UIwin.MainWin.Layout.addWidget(self.HyperGroup,0,2,1,1)
+        
 class BreakHyperstack(QGroupBox):
     def __init__(self,parent):
         super().__init__()
@@ -459,6 +490,7 @@ class BreakHyperstack(QGroupBox):
         
 class MainWin(QWidget):
     sig_openDeskew = pyqtSignal(dict)
+    sig_openHyper = pyqtSignal()
     def __init__(self):
         super().__init__()
 
