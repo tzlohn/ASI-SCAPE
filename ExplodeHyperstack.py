@@ -52,7 +52,7 @@ class SortWorker(QObject):
                     RealPageNo = Remainder%ZLayerNo
                     if RealPageNo == 0:
                         [SNstr,SN] = self.SortWin.getNamePost(count)
-                        NewFileName = NameTemplate+"_"+SNstr+".tiff"
+                        NewFileName = NameTemplate+"_"+SNstr+".ome.tif"
                         NewFileNames[NewFileName] = SN
                         count = count+1
                         img =TFF.memmap(NewFileName,shape=(ZLayerNo,data.shape[0],data.shape[1]), dtype=np.uint16, metadata = {"axes":"ZYX"}, bigtiff = True)                        
@@ -75,7 +75,7 @@ class DeskewWorker(QObject):
         OriImageShape = self.pars["OriImageShape"]
         NewSize = self.pars["NewSize"]
         Shift = self.pars["Shift"]
-
+        
         for FileName in ImgNames:
             print("Deskewing %s..."%FileName)
             NewFileName = "Deskew_"+FileName
@@ -126,6 +126,78 @@ class DeskewWorker(QObject):
         
         return [int(start_x),int(end_x),int(start_y),int(end_y)]
 
+class HyperstackWorker(QObject):
+    def __init__(self,parent):
+        super().__init__()
+        self.HyperWin = parent
+        self.SortWin = self.HyperWin.SortWin
+    
+    def assembleHyperstack(self):
+        MaxProj = self.HyperWin.MaxProjCB.isChecked()
+        ImgNames = self.SortWin.NewFileNames
+        DimDict = self.SortWin.DimOrderDict
+        Order = self.HyperWin.HyperstackType.currentText()
+        ChannelNo = self.SortWin.ColorChannels.value()
+        TimePointNo = self.SortWin.TimePointNo.value()
+        Metadict = dict()
+
+        for idx,name in enumerate(ImgNames):
+            Channel = DimDict[name][0] 
+            Time = DimDict[name][1]
+            RealName = "Deskew_"+name
+            if MaxProj:
+                RealName = "MaxProj_"+RealName
+
+            with TFF.TiffFile(RealName) as tif:
+                if idx == 0:
+                    Layers = len(tif.pages)
+                    DeskewShape = tif.pages[0].asarray().shape
+                    if MaxProj:
+                        ProjOrder = Order.replace("Z","")
+                        NewFileName = "MaxProj_Deskew_"+self.SortWin.NamePrefix+".ome.tif"
+                        Shape = self.getShapeByOrder(ProjOrder,TimePointNo,ChannelNo,Layers,DeskewShape)
+                        Metadict["axes"] = ProjOrder[::-1]                    
+                    else:
+                        NewFileName = "Deskew_"+self.SortWin.NamePrefix+".ome.tif"    
+                        Shape = self.getShapeByOrder(Order,TimePointNo,ChannelNo,Layers,DeskewShape)
+                        Metadict["axes"] = Order[::-1]
+                    img = TFF.memmap(NewFileName,shape = Shape, dtype = np.uint16, metadata = Metadict, bigtiff = True)
+
+                if MaxProj:
+                    img[Time,Channel,:,:] = tif.pages[0].asarray()
+                else: 
+                    for ind,aFrame in enumerate(tif.pages):                       
+                        img[Time,Channel,ind,:,:] = aFrame.asarray()
+
+                tif.close()
+
+            if self.HyperWin.DeleteCB.isChecked():
+                os.remove(RealName)
+
+            img.flush()
+
+    def getShapeByOrder(self,DimOrder,TimePointNo,ChannelNo,Layers,Shape2D):
+        match len(DimOrder):
+            case 5:
+                shape = (TimePointNo,ChannelNo,Layers,Shape2D[0],Shape2D[1])
+            case 4:
+                if DimOrder[2] == "Z":
+                    match DimOrder[3]:
+                        case "T":
+                            shape = (TimePointNo,Layers,Shape2D[0],Shape2D[1])
+                        case "C":
+                            shape = (ChannelNo,Layers,Shape2D[0],Shape2D[1])
+                else:
+                    shape = (TimePointNo,ChannelNo,Shape2D[0],Shape2D[1])
+            case 3:
+                match DimOrder[2]:
+                    case "T":
+                        shape = (TimePointNo,Shape2D[0],Shape2D[1])
+                    case "C":
+                        shape = (ChannelNo,Shape2D[0],Shape2D[1])                
+
+        return shape
+
 class Hyperstack(QGroupBox):
     def __init__(self,parent):
         super().__init__()
@@ -138,7 +210,7 @@ class Hyperstack(QGroupBox):
 
         self.TypeLabel = QLabel(parent = self, text = "Hyperstack type:")
         self.HyperstackType = QComboBox(self)
-        self.HyperstackType.addItems(["XYZC","XYZT","XYZCT"])
+        self.HyperstackType.addItems(["XYZCT"])
 
         self.MaxProjCB = QCheckBox(self)
         self.MaxProjCB.setText("Stacking max projection images")
@@ -158,37 +230,23 @@ class Hyperstack(QGroupBox):
         self.Layout.addWidget(self.MaxProjCB,2,0,1,4)
         self.Layout.addWidget(self.DeleteCB,3,0,1,4)
         self.Layout.addWidget(self.CreateHyperstack,4,0,1,4)
+
+        self.HyperThread = QThread(self)
+        self.HyperWorker = HyperstackWorker(self)
+        self.HyperWorker.moveToThread(self.HyperThread)
+        self.HyperThread.started.connect(self.HyperWorker.assembleHyperstack)
     
-    def assembleHyperstack(self,MaxProj = False):
-        ImgNames = self.SortWin.NewFileNames
-        NewFileName = "temp.tif"
-        Metadict = dict()
-        Metadict["axes"] = self.HyperstackType.currentText()
-
-        LayerCount = 0
-        for idx,name in enumerate(ImgNames):
-            RealName = "Deskew_"+name
-            if MaxProj:
-                RealName = "MaxProj_"+RealName
-
-            with TFF.TiffFile(RealName) as tif:
-                Layers = len(tif.pages)
-                if idx == 0:
-                    DeskewShape = tif.pages[0].asarray().shape
-                    img = TFF.memmap(NewFileName,shape = (len(ImgNames)*Layers,DeskewShape[0],DeskewShape[1]),dtype = np.uint16, metadata = Metadict, bigtiff = True)
-
-                for ind,aFrame in enumerate(tif.pages):
-                    img[LayerCount+ind,:,:] = aFrame.asarray()
-
-                tif.close() 
-
-            img.flush()
-            LayerCount = LayerCount + Layers
-                
     def createHyperstack(self):
-        self.assembleHyperstack()
         if self.MaxProjCB.isChecked():
-            self.assembleHyperstack(MaxProj = True)
+            print("Hyperstacking Max Projection images...")
+        else:
+            print("Hyperstacking 3D images...")
+
+        if self.HyperThread.isRunning():
+            return False
+        
+        self.HyperThread.start()
+        self.HyperThread.quit()
       
 class BackShift(QGroupBox):
     def __init__(self,parent):
@@ -198,6 +256,19 @@ class BackShift(QGroupBox):
         self.UIwin.MainWin.sig_openHyper.connect(self.openHyperCreator)
 
         self.setTitle("Deskew")
+
+        self.SliceStepLabel = QLabel(parent = self, text= "Slice Step:")
+        self.SliceStep = QDoubleSpinBox(self)
+        self.SliceStep.setMinimum(0)
+        self.SliceStep.setDecimals(3)
+        self.SliceStep.setSingleStep(0.01)
+        if self.UIwin.SliceStep is False:
+            self.SliceStep.setValue(0)
+        else:
+            self.SliceStep.setValue(self.UIwin.SliceStep)
+        self.SliceStepCB = QCheckBox(self)
+        self.SliceStepCB.stateChanged.connect(self.checkState)
+
         self.BinningLabel = QLabel(parent = self, text= "Binning:")
         self.Binning = QSpinBox(self)
         self.Binning.setMinimum(1)
@@ -226,18 +297,22 @@ class BackShift(QGroupBox):
         self.Deskew = QPushButton(self)
         self.Deskew.setText("Deskew")
         self.Deskew.clicked.connect(self.deskewImages)
+        self.Deskew.setDisabled(True)
 
         self.Layout = QGridLayout(self)
-        self.Layout.addWidget(self.BinningLabel,0,0,1,2)
-        self.Layout.addWidget(self.Binning,0,2,1,2)
-        self.Layout.addWidget(self.SlopeLabel,1,0,1,2)
-        self.Layout.addWidget(self.Slope,1,2,1,2)
-        self.Layout.addWidget(self.CamRotateBox,2,0,1,4)
-        self.Layout.addWidget(self.selectImageLabel,3,0,1,2)
-        self.Layout.addWidget(self.selectImage,4,0,1,4)
-        self.Layout.addWidget(self.SelectAll,5,0,1,4)
-        self.Layout.addWidget(self.MaxProj,6,0,1,4)
-        self.Layout.addWidget(self.Deskew,7,0,1,4)
+        self.Layout.addWidget(self.SliceStepLabel,0,0,1,2)
+        self.Layout.addWidget(self.SliceStep,0,2,1,2)
+        self.Layout.addWidget(self.SliceStepCB,0,4,1,1)
+        self.Layout.addWidget(self.BinningLabel,1,0,1,2)
+        self.Layout.addWidget(self.Binning,1,2,1,2)
+        self.Layout.addWidget(self.SlopeLabel,2,0,1,2)
+        self.Layout.addWidget(self.Slope,2,2,1,2)
+        self.Layout.addWidget(self.CamRotateBox,3,0,1,4)
+        self.Layout.addWidget(self.selectImageLabel,4,0,1,2)
+        self.Layout.addWidget(self.selectImage,5,0,1,4)
+        self.Layout.addWidget(self.SelectAll,6,0,1,4)
+        self.Layout.addWidget(self.MaxProj,7,0,1,4)
+        self.Layout.addWidget(self.Deskew,8,0,1,4)
 
         self.setLayout(self.Layout)
 
@@ -251,6 +326,12 @@ class BackShift(QGroupBox):
             self.selectImage.setDisabled(True)
         else:
             self.selectImage.setEnabled(True)
+    
+    def checkState(self):
+        if self.SliceStepCB.isChecked():
+            self.Deskew.setEnabled(True)
+        else:
+            self.Deskew.setDisabled(True)
     
     def deskewImages(self):
         if self.DeskewThread.isRunning():
@@ -419,14 +500,14 @@ class BreakHyperstack(QGroupBox):
         self.BreakDownThread = QThread(self)
         self.BreakDownWorker = SortWorker(self)
         self.BreakDownWorker.moveToThread(self.BreakDownThread)
-        self.BreakDownThread.started.connect(self.BreakDownWorker.breakdown)
-        #self.NewFileNames = ["test1.tif","test2.tif"]
-        #self.openDeskew()        
+        self.BreakDownThread.started.connect(self.BreakDownWorker.breakdown)        
 
     def browseDir(self):
         ImageDir = QFileDialog.getExistingDirectory(self,"select the dir for saving images")
         self.FilePath.setText(ImageDir)
         os.chdir(self.FilePath.text())
+        NamePrefix = glob.glob("*pos0.ome*")
+        self.NamePrefix = NamePrefix[0][0:-8] 
 
     def setEnableStates(self):
         pass
@@ -503,7 +584,7 @@ class BreakHyperstack(QGroupBox):
             self.ZLayerNo.setValue(SliceNo)
             self.TimePointNo.setValue(TimePoint)
         except:
-            SliceStep = 1.1
+            self.SliceStep = False
             StackMetadata = {"info":"No AcqSettings.txt"}
             print("no AcqSettings.txt found")
 
@@ -518,6 +599,7 @@ class BreakHyperstack(QGroupBox):
     
     @pyqtSlot(dict)
     def openDeskew(self,NewFileNames):
+        self.DimOrderDict = NewFileNames
         self.NewFileNames = list(NewFileNames.keys())
         self.DeskewGroup = BackShift(self)
         self.MainWin.Layout.addWidget(self.DeskewGroup,0,4,4,4)
