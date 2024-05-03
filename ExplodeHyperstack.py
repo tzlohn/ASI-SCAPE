@@ -144,6 +144,7 @@ class HyperstackWorker(QObject):
         TimePointNo = self.SortWin.TimePointNo.value()
         Metadict = dict()
 
+        self.SortWin.MainWin.sig_progress.emit(0)
         for idx,name in enumerate(ImgNames):
             Channel = DimDict[name][0] 
             Time = DimDict[name][1]
