@@ -44,11 +44,11 @@ class SortWorker(QObject):
         Remainder = 0
         count = 0
         
-        for aTiff in AllTif:
+        for idx,aTiff in enumerate(AllTif):
             print(aTiff,Remainder)
             with TFF.TiffFile(aTiff) as tif:
-                for idx in range(len(tif.pages)):
-                    data = tif.pages[idx].asarray()
+                for page in tif.pages:
+                    data = page.asarray()
                     RealPageNo = Remainder%ZLayerNo
                     if RealPageNo == 0:
                         [SNstr,SN] = self.SortWin.getNamePost(count)
@@ -60,7 +60,8 @@ class SortWorker(QObject):
                     Remainder = Remainder+1                
                 tif.close()
             img.flush()
-        
+            self.SortWin.MainWin.sig_progress.emit(int(round(100*(idx+1)/len(AllTif))))
+
         self.SortWin.MainWin.sig_openDeskew.emit(NewFileNames)
 
 class DeskewWorker(QObject):
@@ -76,7 +77,7 @@ class DeskewWorker(QObject):
         NewSize = self.pars["NewSize"]
         Shift = self.pars["Shift"]
         
-        for FileName in ImgNames:
+        for idx,FileName in enumerate(ImgNames):
             print("Deskewing %s..."%FileName)
             NewFileName = "Deskew_"+FileName
             img =TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, metadata = metadata, bigtiff = True)
@@ -91,7 +92,9 @@ class DeskewWorker(QObject):
             if self.ShiftWin.MaxProj.isChecked():
                 MaxProjName = "MaxProj_"+NewFileName
                 TFF.imwrite(MaxProjName,np.max(img,axis = 0))
-        
+            
+            self.ShiftWin.UIwin.MainWin.sig_progress.emit(int(round(100*(idx+1)/len(ImgNames))))
+
         self.ShiftWin.UIwin.MainWin.sig_openHyper.emit()
         
     def setParameters(self,pars):
@@ -173,8 +176,10 @@ class HyperstackWorker(QObject):
 
             if self.HyperWin.DeleteCB.isChecked():
                 os.remove(RealName)
-
+            
+            self.SortWin.MainWin.sig_progress.emit(int(round(100*(idx+1)/len(ImgNames))))
             img.flush()
+
 
     def getShapeByOrder(self,DimOrder,TimePointNo,ChannelNo,Layers,Shape2D):
         match len(DimOrder):
@@ -237,6 +242,8 @@ class Hyperstack(QGroupBox):
         self.HyperThread.started.connect(self.HyperWorker.assembleHyperstack)
     
     def createHyperstack(self):
+        self.DeskewWin.Deskew.setDisabled(True)
+
         if self.MaxProjCB.isChecked():
             print("Hyperstacking Max Projection images...")
         else:
@@ -262,10 +269,12 @@ class BackShift(QGroupBox):
         self.SliceStep.setMinimum(0)
         self.SliceStep.setDecimals(3)
         self.SliceStep.setSingleStep(0.01)
+        """
         if self.UIwin.SliceStep is False:
             self.SliceStep.setValue(0)
         else:
             self.SliceStep.setValue(self.UIwin.SliceStep)
+        """
         self.SliceStepCB = QCheckBox(self)
         self.SliceStepCB.stateChanged.connect(self.checkState)
 
@@ -285,7 +294,7 @@ class BackShift(QGroupBox):
 
         self.selectImageLabel = QLabel(parent = self, text = "Select a file for deskew:")
         self.selectImage = QComboBox(self)
-        self.selectImage.addItems(self.UIwin.NewFileNames)
+        #self.selectImage.addItems(self.UIwin.NewFileNames)
 
         self.SelectAll = QCheckBox(self)
         self.SelectAll.setText("select all images")
@@ -328,6 +337,9 @@ class BackShift(QGroupBox):
             self.selectImage.setEnabled(True)
     
     def checkState(self):
+        if self.HyperGroup.HyperThread.isRunning():
+            return False
+
         if self.SliceStepCB.isChecked():
             self.Deskew.setEnabled(True)
         else:
@@ -341,7 +353,7 @@ class BackShift(QGroupBox):
             MsgBox.setIcon(QMessageBox.Warning)
             MsgBox.show()
             return False
-        
+        self.UIwin.SortHyperStack.setDisabled(True)
         SliceStep = self.UIwin.SliceStep
 
         if not self.SelectAll.isChecked:
@@ -420,8 +432,14 @@ class BackShift(QGroupBox):
     
     @pyqtSlot()
     def openHyperCreator(self):
-        self.HyperGroup = Hyperstack(self)
-        self.UIwin.MainWin.Layout.addWidget(self.HyperGroup,0,8,3,4)
+        self.UIwin.SortHyperStack.setEnabled(True)
+        self.HyperGroup.setEnabled(True)
+        if not self.MaxProj.isChecked():
+            self.HyperGroup.MaxProjCB.setDisabled(True)
+        else:
+            self.HyperGroup.MaxProjCB.setEnabled(True)
+        #self.HyperGroup = Hyperstack(self)
+        #self.UIwin.MainWin.Layout.addWidget(self.HyperGroup,0,8,3,4)
         
 class BreakHyperstack(QGroupBox):
     def __init__(self,parent):
@@ -513,6 +531,9 @@ class BreakHyperstack(QGroupBox):
         pass
 
     def checkStart(self):
+        if self.DeskewGroup.DeskewThread.isRunning():
+            return False
+
         if not self.HyperStackCB.isChecked():
             self.SortHyperStack.setDisabled(True)
             return False
@@ -601,21 +622,42 @@ class BreakHyperstack(QGroupBox):
     def openDeskew(self,NewFileNames):
         self.DimOrderDict = NewFileNames
         self.NewFileNames = list(NewFileNames.keys())
-        self.DeskewGroup = BackShift(self)
-        self.MainWin.Layout.addWidget(self.DeskewGroup,0,4,4,4)
+        self.DeskewGroup.setEnabled(True)
+        if self.SliceStep is False:
+            self.DeskewGroup.SliceStep.setValue(0)
+        else:
+            self.DeskewGroup.SliceStep.setValue(self.SliceStep)
+        self.DeskewGroup.selectImage.addItems(self.NewFileNames)
+        #self.DeskewGroup = BackShift(self)
+        #self.MainWin.Layout.addWidget(self.DeskewGroup,0,4,4,4)
         
 class MainWin(QWidget):
     sig_openDeskew = pyqtSignal(dict)
     sig_openHyper = pyqtSignal()
+    sig_progress = pyqtSignal(int)
     def __init__(self):
         super().__init__()
 
+        self.sig_progress.connect(self.updateProgressbar)
+
         self.setWindowTitle("ASI SCAPE deskewing tool")
         BreakdownGroup = BreakHyperstack(self)
+        BreakdownGroup.DeskewGroup = BackShift(BreakdownGroup)
+        BreakdownGroup.DeskewGroup.setDisabled(True)
+        BreakdownGroup.DeskewGroup.HyperGroup = Hyperstack(BreakdownGroup.DeskewGroup)
+        BreakdownGroup.DeskewGroup.HyperGroup.setDisabled(True)
+        self.ProgressBar = QProgressBar(self)
 
         self.Layout = QGridLayout(self)
         self.Layout.addWidget(BreakdownGroup,0,0,4,4)
+        self.Layout.addWidget(BreakdownGroup.DeskewGroup,0,4,4,4)
+        self.Layout.addWidget(BreakdownGroup.DeskewGroup.HyperGroup,0,8,3,4)
+        self.Layout.addWidget(self.ProgressBar,3,8,1,5)
         self.setLayout(self.Layout)
+    
+    @pyqtSlot(int)
+    def updateProgressbar(self,percent):
+        self.ProgressBar.setValue(percent)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
