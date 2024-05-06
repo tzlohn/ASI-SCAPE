@@ -5,7 +5,7 @@ import numpy as np
 import sys,os,glob,json
 
 #HyperOrder = ["XYZC","XYZT","XYZCT","XYZTC","XYCZ","XYTZ"]
-HyperOrder = ["XYZCT","XYZTC"]
+HyperOrder = ["XYZCT","XYCZT","XYZTC"]
 
 def sortName(Names:list):
     #This function solves the file name sorting result with *_1.tif,*_10.tif,...*_19.tif,*_2.tif,*_20.tif
@@ -30,17 +30,23 @@ class SortWorker(QObject):
         self.SortWin = parent
     
     def breakdown(self):
-        AllTif = glob.glob("*.tif")
-        if len(AllTif) > 1:
-            for atif in AllTif:
-                if atif[0:6] == "Deskew":
-                    os.remove(atif)
+        NameRE = self.SortWin.NamePrefix + "*ome.tif"
+        AllTif = glob.glob(NameRE)
         AllTif = sortName(AllTif)
 
         NewFileNames = dict()
+        OutputImgs = dict()
 
         ZLayerNo = self.SortWin.ZLayerNo.value()
-        NameTemplate = AllTif[0][0:-8]
+        HyperOrder = self.SortWin.HyperStackOrder.currentText()
+        ChannelNo = self.SortWin.ColorChannels.value()
+        if HyperOrder[3] == "Z":
+            StackNo = ChannelNo*ZLayerNo
+            MultiplexCount = ChannelNo
+        else:
+            StackNo = ZLayerNo
+            MultiplexCount = 1
+        NameTemplate = self.SortWin.NamePrefix
         Remainder = 0
         count = 0
         
@@ -49,17 +55,20 @@ class SortWorker(QObject):
             with TFF.TiffFile(aTiff) as tif:
                 for page in tif.pages:
                     data = page.asarray()
-                    RealPageNo = Remainder%ZLayerNo
-                    if RealPageNo == 0:
-                        [SNstr,SN] = self.SortWin.getNamePost(count)
-                        NewFileName = NameTemplate+"_"+SNstr+".ome.tif"
-                        NewFileNames[NewFileName] = SN
-                        count = count+1
-                        img =TFF.memmap(NewFileName,shape=(ZLayerNo,data.shape[0],data.shape[1]), dtype=np.uint16, metadata = {"axes":"ZYX"}, bigtiff = True)                        
-                    img[RealPageNo,:,:] = data
+                    RealPageNo = Remainder%StackNo//MultiplexCount
+                    [SNstr,SN] = self.SortWin.getNamePost(Remainder)
+                    FileName = NameTemplate+"_"+SNstr+".ome.tif"
+                    if not FileName in OutputImgs:
+                        NewFileNames[FileName] = SN
+                        OutputImgs[FileName] = TFF.memmap(FileName,shape=(ZLayerNo,data.shape[0],data.shape[1]), dtype=np.uint16, metadata = {"axes":"TCZYX"}, bigtiff = True)
+                    try:
+                        OutputImgs[FileName][RealPageNo,:,:] = data
+                    except:
+                        print(OutputImgs.keys())
+                    if RealPageNo == ZLayerNo-1:
+                        OutputImgs[FileName].flush()
                     Remainder = Remainder+1                
                 tif.close()
-            img.flush()
             self.SortWin.MainWin.sig_progress.emit(int(round(100*(idx+1)/len(AllTif))))
 
         self.SortWin.MainWin.sig_openDeskew.emit(NewFileNames)
@@ -525,8 +534,6 @@ class BreakHyperstack(QGroupBox):
         ImageDir = QFileDialog.getExistingDirectory(self,"select the dir for saving images")
         self.FilePath.setText(ImageDir)
         os.chdir(self.FilePath.text())
-        NamePrefix = glob.glob("*pos0.ome*")
-        self.NamePrefix = NamePrefix[0][0:-8] 
 
     def setEnableStates(self):
         pass
@@ -558,15 +565,22 @@ class BreakHyperstack(QGroupBox):
         Order = self.HyperStackOrder.currentText()
         ChannelNo = self.ColorChannels.value()
         TimePointNo = self.TimePointNo.value()
+        ZLayer = self.ZLayerNo.value()
         match Order[3]:
             case "C":
+                idx = idx//ZLayer
                 keyNo = ChannelNo
                 TSN = "0"*(len(str(TimePointNo))-len(str(idx//keyNo)))+str(idx//keyNo)
                 return ["C"+str(1+idx%keyNo)+"_T"+TSN,(idx%keyNo,idx//keyNo)]
             case "T":
+                idx = idx//ZLayer
                 keyNo = TimePointNo
                 TSN = "0"*(len(str(TimePointNo))-len(str(idx%keyNo)))+str(idx%keyNo)
                 return ["T"+TSN+"_C"+str(1+idx//keyNo),(idx//keyNo,idx%keyNo)]
+            case "Z":
+                keyNo = ChannelNo*ZLayer
+                TSN = "0"*(len(str(TimePointNo))-len(str(idx//keyNo)))+str(idx//keyNo)
+                return ["C"+str(1+idx%ChannelNo)+"_T"+TSN,(idx%ChannelNo,idx//keyNo)]
 
     def startSorting(self):
         CheckState = self.checkStart()
@@ -600,6 +614,7 @@ class BreakHyperstack(QGroupBox):
             ChannelNo = StackMetadata["numChannels"]
             SliceNo = StackMetadata["numSlices"]
             TimePoint = StackMetadata["numTimepoints"]
+            self.NamePrefix = StackMetadata["saveNamePrefix"]
             #print("Find slice step",SliceStep)
             #print(StackMetadata)
             self.ColorChannels.setValue(ChannelNo)
