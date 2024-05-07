@@ -30,7 +30,7 @@ class SortWorker(QObject):
         self.SortWin = parent
     
     def breakdown(self):
-        NameRE = self.SortWin.NamePrefix + "*ome.tif"
+        NameRE = self.SortWin.NamePrefix+"_MMStack_" + "*ome.tif"
         AllTif = glob.glob(NameRE)
         AllTif = sortName(AllTif)
 
@@ -40,6 +40,7 @@ class SortWorker(QObject):
         ZLayerNo = self.SortWin.ZLayerNo.value()
         HyperOrder = self.SortWin.HyperStackOrder.currentText()
         ChannelNo = self.SortWin.ColorChannels.value()
+        TimePnts = self.SortWin.TimePointNo.value()
         if HyperOrder[3] == "Z":
             StackNo = ChannelNo*ZLayerNo
             MultiplexCount = ChannelNo
@@ -48,8 +49,8 @@ class SortWorker(QObject):
             MultiplexCount = 1
         NameTemplate = self.SortWin.NamePrefix
         Remainder = 0
-        count = 0
-        
+        FileExistingWarning = False
+        #if not self.checkDeskewExisting(ChannelNo,TimePnts,self.SortWin.NamePrefix):
         for idx,aTiff in enumerate(AllTif):
             print(aTiff,Remainder)
             with TFF.TiffFile(aTiff) as tif:
@@ -60,11 +61,15 @@ class SortWorker(QObject):
                     FileName = NameTemplate+"_"+SNstr+".ome.tif"
                     if not FileName in OutputImgs:
                         NewFileNames[FileName] = SN
-                        OutputImgs[FileName] = TFF.memmap(FileName,shape=(ZLayerNo,data.shape[0],data.shape[1]), dtype=np.uint16, metadata = {"axes":"TCZYX"}, bigtiff = True)
-                    try:
-                        OutputImgs[FileName][RealPageNo,:,:] = data
-                    except:
-                        print(OutputImgs.keys())
+                        if os.path.exists(FileName):
+                            Remainder = Remainder+1
+                            if not FileExistingWarning:
+                                FileExistingWarning = True
+                                #self.SortWin.showFileExistingWarningBox()
+                            continue
+                        OutputImgs[FileName] = TFF.memmap(FileName,shape=(ZLayerNo,data.shape[0],data.shape[1]), dtype=np.uint16, metadata = {"axes":"ZYX"}, bigtiff = True)
+
+                    OutputImgs[FileName][RealPageNo,:,:] = data
                     if RealPageNo == ZLayerNo-1:
                         OutputImgs[FileName].flush()
                     Remainder = Remainder+1                
@@ -72,6 +77,15 @@ class SortWorker(QObject):
             self.SortWin.MainWin.sig_progress.emit(int(round(100*(idx+1)/len(AllTif))))
 
         self.SortWin.MainWin.sig_openDeskew.emit(NewFileNames)
+
+    def checkDeskewExisting(self,ChannelNo,TimePnt,prefix):
+        Name = "Deskew_"+prefix+"*.tif"
+        DeskewTiffs = glob.glob(Name)
+        if len(DeskewTiffs) == ChannelNo*TimePnt:
+            return True
+        else:
+            return False
+
 
 class DeskewWorker(QObject):
     def __init__(self,parent):
@@ -85,7 +99,7 @@ class DeskewWorker(QObject):
         OriImageShape = self.pars["OriImageShape"]
         NewSize = self.pars["NewSize"]
         Shift = self.pars["Shift"]
-        
+
         for idx,FileName in enumerate(ImgNames):
             print("Deskewing %s..."%FileName)
             NewFileName = "Deskew_"+FileName
@@ -366,7 +380,7 @@ class BackShift(QGroupBox):
         self.UIwin.SortHyperStack.setDisabled(True)
         SliceStep = self.UIwin.SliceStep
 
-        if not self.SelectAll.isChecked:
+        if not self.SelectAll.isChecked():
             ImgNames = [self.selectImage.currentText()]
         else:
             ImgNames = self.UIwin.NewFileNames
@@ -646,6 +660,13 @@ class BreakHyperstack(QGroupBox):
         self.DeskewGroup.selectImage.addItems(self.NewFileNames)
         #self.DeskewGroup = BackShift(self)
         #self.MainWin.Layout.addWidget(self.DeskewGroup,0,4,4,4)
+    
+    def showFileExistingWarningBox(self):
+        MsgBox = QMessageBox()
+        MsgBox.setWindowTitle("Files existing")
+        MsgBox.setText("Exploded ome-tiff is existing. \nThe process will still need to run for getting info for next steps, please wait!")
+        MsgBox.setIcon(QMessageBox.Warning)
+        MsgBox.show()
         
 class MainWin(QWidget):
     sig_openDeskew = pyqtSignal(dict)
