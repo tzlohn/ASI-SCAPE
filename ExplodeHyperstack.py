@@ -51,6 +51,7 @@ class SortWorker(QObject):
         Remainder = 0
         FileExistingWarning = False
         #if not self.checkDeskewExisting(ChannelNo,TimePnts,self.SortWin.NamePrefix):
+        self.SortWin.MainWin.sig_progress.emit(1)
         for idx,aTiff in enumerate(AllTif):
             print(aTiff,Remainder)
             with TFF.TiffFile(aTiff) as tif:
@@ -68,8 +69,10 @@ class SortWorker(QObject):
                                 #self.SortWin.showFileExistingWarningBox()
                             continue
                         OutputImgs[FileName] = TFF.memmap(FileName,shape=(ZLayerNo,data.shape[0],data.shape[1]), dtype=np.uint16, metadata = {"axes":"ZYX"}, bigtiff = True)
+                        #OutputImgs[FileName] = TFF.memmap(FileName,shape=(ZLayerNo,200,data.shape[1]), dtype=np.uint16, metadata = {"axes":"ZYX"}, bigtiff = True)
 
                     OutputImgs[FileName][RealPageNo,:,:] = data
+                    #OutputImgs[FileName][RealPageNo,:,:] = data[900:1100,:]
                     if RealPageNo == ZLayerNo-1:
                         OutputImgs[FileName].flush()
                     Remainder = Remainder+1                
