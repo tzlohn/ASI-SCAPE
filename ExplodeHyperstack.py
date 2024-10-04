@@ -30,7 +30,7 @@ class SortWorker(QObject):
         self.SortWin = parent
     
     def breakdown(self):
-        NameRE = self.SortWin.NamePrefix+"_MMStack_" + "*ome.tif"
+        NameRE = self.SortWin.NamePrefix+"*_MMStack_" + "*ome.tif"
         AllTif = glob.glob(NameRE)
         AllTif = sortName(AllTif)
 
@@ -78,7 +78,7 @@ class SortWorker(QObject):
                     Remainder = Remainder+1                
                 tif.close()
             self.SortWin.MainWin.sig_progress.emit(int(round(100*(idx+1)/len(AllTif))))
-
+        print(NewFileNames)
         self.SortWin.MainWin.sig_openDeskew.emit(NewFileNames)
 
     def checkDeskewExisting(self,ChannelNo,TimePnt,prefix):
@@ -314,7 +314,7 @@ class BackShift(QGroupBox):
 
         self.SlopeLabel = QLabel(parent = self, text = "Step size to angle ratio:")
         self.Slope = QComboBox(self)
-        self.Slope.addItems(["70µm/°","35µm/°"])
+        self.Slope.addItems(["70µm/°","45µm/°"])
 
         self.CamRotateBox = QCheckBox(self)
         self.CamRotateBox.setText("Was the camera rotated (2024 configuration)?")
@@ -427,7 +427,7 @@ class BackShift(QGroupBox):
         match(self.Slope.currentText()):
             case "70µm/°":
                 isRescale = True
-            case "35µm/°":
+            case "45µm/°":
                 isRescale = False
 
         dim_x = shape[-1]
