@@ -29,6 +29,16 @@ class SortWorker(QObject):
         super().__init__()
         self.SortWin = parent
     
+
+    def checkDoneTif(self,AllTif):
+        NewDoneTif = list()
+        for atif in AllTif:
+            if "MMStack" in atif:
+                continue
+            else:
+                NewDoneTif.append(atif)
+        return NewDoneTif
+    
     def breakdown(self):
         NameRE = self.SortWin.NamePrefix+"*_MMStack_" + "*ome.tif"
         AllTif = glob.glob(NameRE)
@@ -50,45 +60,48 @@ class SortWorker(QObject):
         NameTemplate = self.SortWin.NamePrefix
         Remainder = 0
         FileExistingWarning = False
-        #if not self.checkDeskewExisting(ChannelNo,TimePnts,self.SortWin.NamePrefix):
+        #if self.checkDeskewExisting(ChannelNo,TimePnts,self.SortWin.NamePrefix):
         self.SortWin.MainWin.sig_progress.emit(1)
         for idx,aTiff in enumerate(AllTif):
-            print(aTiff,Remainder)
             with TFF.TiffFile(aTiff) as tif:
-                for page in tif.pages:
+                for ind,page in enumerate(tif.pages):
                     data = page.asarray()
-                    RealPageNo = Remainder%StackNo//MultiplexCount
-                    [SNstr,SN] = self.SortWin.getNamePost(Remainder)
-                    FileName = NameTemplate+"_"+SNstr+".ome.tif"
-                    if not FileName in OutputImgs:
-                        NewFileNames[FileName] = SN
-                        if os.path.exists(FileName):
-                            Remainder = Remainder+1
-                            if not FileExistingWarning:
-                                FileExistingWarning = True
-                                #self.SortWin.showFileExistingWarningBox()
-                            continue
-                        OutputImgs[FileName] = TFF.memmap(FileName,shape=(ZLayerNo,data.shape[0],data.shape[1]), dtype=np.uint16, metadata = {"axes":"ZYX"}, bigtiff = True)
-                        #OutputImgs[FileName] = TFF.memmap(FileName,shape=(ZLayerNo,200,data.shape[1]), dtype=np.uint16, metadata = {"axes":"ZYX"}, bigtiff = True)
-
-                    OutputImgs[FileName][RealPageNo,:,:] = data
-                    #OutputImgs[FileName][RealPageNo,:,:] = data[900:1100,:]
-                    if RealPageNo == ZLayerNo-1:
-                        OutputImgs[FileName].flush()
-                    Remainder = Remainder+1                
+                    if data.shape[0] > 0:
+                        RealPageNo = Remainder%StackNo//MultiplexCount
+                        [SNstr,SN] = self.SortWin.getNamePost(Remainder)
+                        FileName = NameTemplate+"_"+SNstr+".ome.tif"
+                        if not FileName in OutputImgs:
+                            NewFileNames[FileName] = SN
+                            if os.path.exists(FileName):
+                                Remainder = Remainder+1
+                                if not FileExistingWarning:
+                                    FileExistingWarning = True
+                                print("%s exists"%FileName)
+                                    #self.SortWin.showFileExistingWarningBox()
+                                continue
+                            OutputImgs[FileName] = TFF.memmap(FileName,shape=(ZLayerNo,data.shape[0],data.shape[1]), dtype=np.uint16, metadata = {"axes":"ZYX"}, bigtiff = True)
+                            #OutputImgs[FileName] = TFF.memmap(FileName,shape=(ZLayerNo,200,data.shape[1]), dtype=np.uint16, metadata = {"axes":"ZYX"}, bigtiff = True)
+                        
+                        OutputImgs[FileName][RealPageNo,:,:] = data
+                        #OutputImgs[FileName][RealPageNo,:,:] = data[900:1100,:]
+                        if RealPageNo == ZLayerNo-1:
+                            OutputImgs[FileName].flush()
+                        Remainder = Remainder+1
+                    else:
+                        print(ind)                
                 tif.close()
             self.SortWin.MainWin.sig_progress.emit(int(round(100*(idx+1)/len(AllTif))))
-        print(NewFileNames)
+        #print(NewFileNames)
         self.SortWin.MainWin.sig_openDeskew.emit(NewFileNames)
 
     def checkDeskewExisting(self,ChannelNo,TimePnt,prefix):
         Name = "Deskew_"+prefix+"*.tif"
         DeskewTiffs = glob.glob(Name)
+        print (len(DeskewTiffs),ChannelNo*TimePnt)
         if len(DeskewTiffs) == ChannelNo*TimePnt:
             return True
         else:
             return False
-
 
 class DeskewWorker(QObject):
     def __init__(self,parent):
@@ -102,10 +115,14 @@ class DeskewWorker(QObject):
         OriImageShape = self.pars["OriImageShape"]
         NewSize = self.pars["NewSize"]
         Shift = self.pars["Shift"]
-
         for idx,FileName in enumerate(ImgNames):
+            print(FileName)
+            if "_MMStack" in FileName:
+                continue
             print("Deskewing %s..."%FileName)
             NewFileName = "Deskew_"+FileName
+            if os.path.exists(NewFileName):
+                continue
             img =TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, metadata = metadata, bigtiff = True)
                 
             with TFF.TiffFile(FileName) as tif:
