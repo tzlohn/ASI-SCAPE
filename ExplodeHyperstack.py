@@ -119,10 +119,24 @@ class DeskewWorker(QObject):
             print(FileName)
             if "_MMStack" in FileName:
                 continue
-            print("Deskewing %s..."%FileName)
+
             NewFileName = "Deskew_"+FileName
             if os.path.exists(NewFileName):
-                continue
+                if self.ShiftWin.MaxProj.isChecked():
+                    MaxProjName = "MaxProj_"+NewFileName
+                    if os.path.exists(MaxProjName):
+                        continue
+                    else:
+                        img = TFF.imread(NewFileName)
+                        try:
+                            TFF.imwrite(MaxProjName,np.max(img,axis = 0))
+                            print("Max Project %s..."%NewFileName)
+                        except:
+                            print(img.shape)
+                else: 
+                    continue
+                
+            print("Deskewing %s..."%FileName)
             img =TFF.memmap(NewFileName,shape = ImageShape, dtype=np.uint16, metadata = metadata, bigtiff = True)
                 
             with TFF.TiffFile(FileName) as tif:
@@ -538,26 +552,29 @@ class BreakHyperstack(QGroupBox):
         self.SortHyperStack = QPushButton("Break down ome-tiff")
         self.SortHyperStack.clicked.connect(self.startSorting)
         self.SortHyperStack.setDisabled(True)
+        self.CheckSkip = QCheckBox(self)
+        self.CheckSkip.setText("Skip this step")
 
-        self.layout = QGridLayout(self)
-        self.layout.addWidget(self.FilePathLabel,0,0,1,2)
-        self.layout.addWidget(self.BrowseButton,0,3,1,2)
-        self.layout.addWidget(self.FilePath,1,0,1,5)
-        self.layout.addWidget(self.HyperStackLabel,2,0,1,2)
-        self.layout.addWidget(self.HyperStackOrder,2,2,1,2)
-        self.layout.addWidget(self.HyperStackCB,2,4,1,1)
-        self.layout.addWidget(self.ZLayerLabel,3,0,1,2)
-        self.layout.addWidget(self.ZLayerNo,3,2,1,2)
-        self.layout.addWidget(self.ZLayerCB,3,4,1,1)
-        self.layout.addWidget(self.ColorChannelLabel,4,0,1,2)
-        self.layout.addWidget(self.ColorChannels,4,2,1,2)
-        self.layout.addWidget(self.ColorChannelCB,4,4,1,1)
-        self.layout.addWidget(self.TimePointLabel,5,0,1,2)
-        self.layout.addWidget(self.TimePointNo,5,2,1,2)
-        self.layout.addWidget(self.TimePointCB,5,4,1,1)
-        self.layout.addWidget(self.SortHyperStack,6,0,1,5)
+        self.Layout = QGridLayout(self)
+        self.Layout.addWidget(self.FilePathLabel,0,0,1,2)
+        self.Layout.addWidget(self.BrowseButton,0,3,1,2)
+        self.Layout.addWidget(self.FilePath,1,0,1,5)
+        self.Layout.addWidget(self.HyperStackLabel,2,0,1,2)
+        self.Layout.addWidget(self.HyperStackOrder,2,2,1,2)
+        self.Layout.addWidget(self.HyperStackCB,2,4,1,1)
+        self.Layout.addWidget(self.ZLayerLabel,3,0,1,2)
+        self.Layout.addWidget(self.ZLayerNo,3,2,1,2)
+        self.Layout.addWidget(self.ZLayerCB,3,4,1,1)
+        self.Layout.addWidget(self.ColorChannelLabel,4,0,1,2)
+        self.Layout.addWidget(self.ColorChannels,4,2,1,2)
+        self.Layout.addWidget(self.ColorChannelCB,4,4,1,1)
+        self.Layout.addWidget(self.TimePointLabel,5,0,1,2)
+        self.Layout.addWidget(self.TimePointNo,5,2,1,2)
+        self.Layout.addWidget(self.TimePointCB,5,4,1,1)
+        self.Layout.addWidget(self.CheckSkip,6,0,1,5)
+        self.Layout.addWidget(self.SortHyperStack,7,0,1,5)
 
-        self.setLayout(self.layout)
+        self.setLayout(self.Layout)
 
         self.BreakDownThread = QThread(self)
         self.BreakDownWorker = SortWorker(self)
